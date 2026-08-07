@@ -1,4 +1,4 @@
-</> PowerShell
+
 # ===========================================
 # Enterprise Password Generator
 # Author: Adriano Felix Lacerda
