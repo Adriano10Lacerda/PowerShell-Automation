@@ -24,7 +24,7 @@ $Caracteres = "ABCDEF"
 
 $Senha = ""
 
-for ($i =0; $i -lt 5; $i++)
+for ($i =0; $i -lt $PasswordLength; $i++)
 {
     $Posicao = Get-Random -Minimum 0 -Maximum $Caracteres.Length
     $Senha += $Caracteres[$Posicao]
