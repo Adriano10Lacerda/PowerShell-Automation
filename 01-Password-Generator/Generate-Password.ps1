@@ -6,11 +6,9 @@
 
 Write-Host ""
 
-$passwordLenght = Read-Host "Enter password Length"
+[int]$PasswordLength = Read-Host "Enter password Length"
 
 Write-Host ""
-
-Write-Host "Selected Length: $PasswordLength" -ForegroundColor Yellow
 
 Clear-Host
 
@@ -20,8 +18,12 @@ Write-Host "------------------------------------" -ForegroundColor Cyan
 
 Write-Host ""
 
-$PasswordLength - Read-Host "Enter Password Length"
+Write-Host "Selected Length: $PasswordLength" -ForegroundColor Yellow
 
-Write-Host ""
+$Caracteres = "ABCDEF"
 
-Write-Host "Selected Length" $PasswordLength" -ForegroundColor Yellow
+for ($i =0; $i -lt 5; $i++)
+{
+    $Posicao = Get-Random -Minimum 0 -Maximum $Caracteres.Length
+    $Caracteres[$Posicao]
+}
