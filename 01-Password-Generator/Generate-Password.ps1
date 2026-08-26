@@ -22,8 +22,13 @@ Write-Host "Selected Length: $PasswordLength" -ForegroundColor Yellow
 
 $Caracteres = "ABCDEF"
 
+$Senha = ""
+
 for ($i =0; $i -lt 5; $i++)
 {
     $Posicao = Get-Random -Minimum 0 -Maximum $Caracteres.Length
-    $Caracteres[$Posicao]
+    $Senha += $Caracteres[$Posicao]
 }
+
+Write-Host "Senha: $Senha"
+
