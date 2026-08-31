@@ -20,7 +20,16 @@ Write-Host ""
 
 Write-Host "Selected Length: $PasswordLength" -ForegroundColor Yellow
 
-$Caracteres = "ABCDEF"
+$Maiusculas = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+$Minusculas = "abcdefghijklmnopqrstuvwxyz"
+$Numeros = "0123456789"
+$Especiais = "!@#$%&*"
+$Obrigatorios = @("A", "a", "1", "!")
+
+
+
+$Caracteres = $Maiusculas + $Minusculas + $Numeros + $Especiais
+
 
 $Senha = ""
 
