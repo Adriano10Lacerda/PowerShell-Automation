@@ -90,6 +90,49 @@ function Test-ADUserProvisioning {
 
     return $true
 }
+function Get-UniqueADSamAccountName {
+    param (
+        [Parameter(Mandatory)]
+        [string]$SamAccountName,
 
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
 
-Export-ModuleMember -Function Test-ADConfiguration, Test-ADUserExists, Test-ADUserProvisioning
+    if (-not $Configuration.DuplicateHandling.Enabled) {
+        return $SamAccountName
+    }
+
+    if ($Configuration.DuplicateHandling.Strategy -ne "Increment") {
+        throw "Estratégia de duplicidade '$($Configuration.DuplicateHandling.Strategy)' não é suportada."
+    }
+
+    $Candidate = $SamAccountName
+    $Counter = 2
+
+    while ($true) {
+
+        if ($Configuration.OfflineSimulation) {
+            return $Candidate
+        }
+
+        try {
+            $User = Get-ADUser -Identity $Candidate -ErrorAction Stop
+
+            if ($null -ne $User) {
+                $Candidate = "$SamAccountName$Counter"
+                $Counter++
+                continue
+            }
+        }
+        catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+            return $Candidate
+        }
+        catch {
+            throw "Não foi possível verificar a disponibilidade do SamAccountName '$Candidate'. Detalhes: $($_.Exception.Message)"
+        }
+    }
+
+}
+
+Export-ModuleMember -Function Test-ADConfiguration, Test-ADUserExists, Test-ADUserProvisioning, Get-ADSamAccountName, Get-UniqueADSamAccountName

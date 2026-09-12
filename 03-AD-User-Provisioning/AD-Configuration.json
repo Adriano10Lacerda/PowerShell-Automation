@@ -3,5 +3,34 @@
     "DomainController": "",
     "TargetOU": "",
     "SimulationMode": true,
-    "OfflineSimulation": true
+    "OfflineSimulation": true,
+
+    "SamAccountName": {
+        "Enabled": true,
+        "MaxLength": 20,
+        "RemoveAccents": true
+    },
+
+    "DuplicateHandling": {
+        "Enabled": true,
+        "Strategy": "Increment"
+    },
+
+    "UserTypes": {
+        "Employee": {
+            "Description": "Funcionário",
+            "Format": "LastName.FirstName",
+            "Suffix": ""
+        },
+        "Contractor": {
+            "Description": "Terceiro",
+            "Format": "LastName.FirstName",
+            "Suffix": ".ext"
+        },
+        "Intern": {
+            "Description": "Estagiário",
+            "Format": "LastName.FirstName",
+            "Suffix": ".est"
+        }
+    }
 }
