@@ -5,6 +5,45 @@
 
 Write-Host ""
 
+# Localiza o módulo de configuração
+$CaminhoModulo = Join-Path $PSScriptRoot "..\02-Configuration\Configuration.psm1"
+
+# Verifica se o módulo existe
+if (-not (Test-Path $CaminhoModulo))
+{
+    Write-Host ""
+    Write-Host "Erro: Configuration.psm1 nao encontrado." -ForegroundColor Red
+    exit
+}
+
+# Carrega o módulo de configuração
+Import-Module $CaminhoModulo -Force
+
+# Localiza o arquivo de configuração
+$CaminhoConfig = Join-Path $PSScriptRoot "..\02-Configuration\config.json"
+
+# Carrega e valida a configuração
+try
+{
+    $Config = Get-Configuration -ConfigurationPath $CaminhoConfig
+}
+catch
+{
+    Write-Host ""
+    Write-Host "Erro: Configuracao invalida." -ForegroundColor Red
+    Write-Host ""
+
+    $Erros = $_.Exception.Message -split " \| "
+
+    foreach ($Erro in $Erros)
+    {
+        Write-Host "- $Erro" -ForegroundColor Red
+    }
+
+    Write-Host ""
+    exit
+}
+
 # Função para gerar índice aleatório criptograficamente seguro
 function Get-SecureRandomIndex
 {
@@ -29,49 +68,21 @@ function Get-SecureRandomIndex
     }
 }
 
-# Solicita o prefixo
-$Prefixo = Read-Host "Digite o prefixo"
+# Obtém valores da configuração
+$Prefixo = $Config.Prefixo
+$QuantidadeCaracteres = $Config.QuantidadeCaracteres
+$FormatoData = $Config.FormatoData
+$Especiais = $Config.CaracteresEspeciais
 
-# Valida o prefixo
-if ([string]::IsNullOrWhiteSpace($Prefixo))
-{
-    Write-Host ""
-    Write-Host "Erro: O prefixo nao pode ficar vazio." -ForegroundColor Red
-    exit
-}
-
-# Solicita a quantidade de caracteres aleatórios
-$EntradaQuantidade = Read-Host "Digite a quantidade de caracteres aleatorios"
-
-# Valida se a entrada contém somente números
-if ($EntradaQuantidade -notmatch '^\d+$')
-{
-    Write-Host ""
-    Write-Host "Erro: Digite somente numeros." -ForegroundColor Red
-    exit
-}
-
-# Converte a entrada para número
-[int]$QuantidadeCaracteres = $EntradaQuantidade
-
-# Valida a quantidade mínima
-if ($QuantidadeCaracteres -lt 4)
-{
-    Write-Host ""
-    Write-Host "Erro: A quantidade deve ser no minimo 4 caracteres." -ForegroundColor Red
-    exit
-}
-
-# Obtém a data atual no formato DDMM
-$Data = Get-Date -Format "ddMM"
+# Obtém a data conforme configuração
+$Data = Get-Date -Format $FormatoData
 
 # Grupos de caracteres
 $Maiusculas = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 $Minusculas = "abcdefghijklmnopqrstuvwxyz"
 $Numeros = "0123456789"
-$Especiais = "!@#$%&*"
 
-# Seleciona um caractere de cada grupo usando aleatoriedade segura
+# Seleciona um caractere obrigatório de cada grupo
 $Obrigatorios = @(
     $Maiusculas[(Get-SecureRandomIndex -Maximum $Maiusculas.Length)]
     $Minusculas[(Get-SecureRandomIndex -Maximum $Minusculas.Length)]
@@ -102,7 +113,7 @@ $Caracteres = $Maiusculas + $Minusculas + $Numeros + $Especiais
 # Começa a parte aleatória
 $ParteAleatoria = $Embaralhados -join ""
 
-# Gera os caracteres restantes usando aleatoriedade segura
+# Gera os caracteres restantes
 for ($i = 4; $i -lt $QuantidadeCaracteres; $i++)
 {
     $Posicao = Get-SecureRandomIndex -Maximum $Caracteres.Length
