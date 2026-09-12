@@ -8,26 +8,53 @@ Write-Host ""
 # Solicita o prefixo
 $Prefixo = Read-Host "Digite o prefixo"
 
+# Valida o prefixo
+if ([string]::IsNullOrWhiteSpace($Prefixo))
+{
+    Write-Host ""
+    Write-Host "Erro: O prefixo nao pode ficar vazio." -ForegroundColor Red
+    exit
+}
+
+# Solicita a quantidade de caracteres aleatórios
+[int]$QuantidadeCaracteres = Read-Host "Digite a quantidade de caracteres aleatorios"
+
+# Valida a quantidade
+if ($QuantidadeCaracteres -lt 4)
+{
+    Write-Host ""
+    Write-Host "Erro: A quantidade deve ser no minimo 4 caracteres." -ForegroundColor Red
+    exit
+}
+
 # Obtém a data atual no formato DDMM
 $Data = Get-Date -Format "ddMM"
 
-# Caracteres permitidos
+# Grupos de caracteres
 $Maiusculas = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 $Minusculas = "abcdefghijklmnopqrstuvwxyz"
 $Numeros = "0123456789"
 $Especiais = "!@#$%&*"
 
+# Seleciona um caractere de cada grupo
+$Obrigatorios = @(
+    $Maiusculas[(Get-Random -Minimum 0 -Maximum $Maiusculas.Length)]
+    $Minusculas[(Get-Random -Minimum 0 -Maximum $Minusculas.Length)]
+    $Numeros[(Get-Random -Minimum 0 -Maximum $Numeros.Length)]
+    $Especiais[(Get-Random -Minimum 0 -Maximum $Especiais.Length)]
+)
+
+# Embaralha os caracteres obrigatórios
+$Obrigatorios = $Obrigatorios | Sort-Object { Get-Random }
+
+# Junta todos os grupos
 $Caracteres = $Maiusculas + $Minusculas + $Numeros + $Especiais
 
-# Gera um caractere especial obrigatório
-$PosicaoEspecial = Get-Random -Minimum 0 -Maximum $Especiais.Length
-$EspecialObrigatorio = $Especiais[$PosicaoEspecial]
+# Começa a parte aleatória
+$ParteAleatoria = $Obrigatorios -join ""
 
-# Começa a parte aleatória com o caractere especial
-$ParteAleatoria = $EspecialObrigatorio
-
-# Gera os outros 3 caracteres aleatórios
-for ($i = 0; $i -lt 3; $i++)
+# Gera os caracteres restantes
+for ($i = 4; $i -lt $QuantidadeCaracteres; $i++)
 {
     $Posicao = Get-Random -Minimum 0 -Maximum $Caracteres.Length
     $ParteAleatoria += $Caracteres[$Posicao]
@@ -47,6 +74,7 @@ Write-Host ""
 
 Write-Host "Prefixo: $Prefixo" -ForegroundColor Yellow
 Write-Host "Data: $Data" -ForegroundColor Yellow
+Write-Host "Caracteres aleatorios: $QuantidadeCaracteres" -ForegroundColor Yellow
 Write-Host "Senha gerada: $Senha" -ForegroundColor Green
 
-Write-Host ""=
+Write-Host ""
