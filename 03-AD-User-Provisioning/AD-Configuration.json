@@ -1,0 +1,7 @@
+{
+    "Domain": "BRSPO",
+    "DomainController": "",
+    "TargetOU": "",
+    "SimulationMode": true,
+    "OfflineSimulation": true
+}
