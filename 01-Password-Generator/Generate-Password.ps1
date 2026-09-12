@@ -17,9 +17,20 @@ if ([string]::IsNullOrWhiteSpace($Prefixo))
 }
 
 # Solicita a quantidade de caracteres aleatórios
-[int]$QuantidadeCaracteres = Read-Host "Digite a quantidade de caracteres aleatorios"
+$EntradaQuantidade = Read-Host "Digite a quantidade de caracteres aleatorios"
 
-# Valida a quantidade
+# Valida se a entrada contém somente números
+if ($EntradaQuantidade -notmatch '^\d+$')
+{
+    Write-Host ""
+    Write-Host "Erro: Digite somente numeros." -ForegroundColor Red
+    exit
+}
+
+# Converte a entrada para número
+[int]$QuantidadeCaracteres = $EntradaQuantidade
+
+# Valida a quantidade mínima
 if ($QuantidadeCaracteres -lt 4)
 {
     Write-Host ""
