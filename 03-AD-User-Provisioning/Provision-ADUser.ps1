@@ -79,7 +79,10 @@ if ($UserTypeIndex -lt 0 -or $UserTypeIndex -ge $UserTypeKeys.Count) {
 
 $UserType = $UserTypeKeys[$UserTypeIndex]
 
+# ============================================
 # Gerar SamAccountName automaticamente
+# ============================================
+
 try {
     $SamAccountName = Get-ADSamAccountName `
         -FirstName $FirstName `
@@ -148,10 +151,10 @@ Write-Host "SamAccountName gerado: $SamAccountName" -ForegroundColor Green
 
 try {
     Test-ADUserProvisioning `
-    -FirstName $FirstName `
-    -LastName $LastName `
-    -SamAccountName $SamAccountName `
-    -Configuration $Configuration | Out-Null
+        -FirstName $FirstName `
+        -LastName $LastName `
+        -SamAccountName $SamAccountName `
+        -Configuration $Configuration | Out-Null
 }
 catch {
     Write-Host ""
