@@ -104,9 +104,10 @@ Write-Host "SamAccountName gerado: $SamAccountName" -ForegroundColor Green
 
 try {
     Test-ADUserProvisioning `
-        -FirstName $FirstName `
-        -LastName $LastName `
-        -SamAccountName $SamAccountName | Out-Null
+    -FirstName $FirstName `
+    -LastName $LastName `
+    -SamAccountName $SamAccountName `
+    -Configuration $Configuration | Out-Null
 }
 catch {
     Write-Host ""

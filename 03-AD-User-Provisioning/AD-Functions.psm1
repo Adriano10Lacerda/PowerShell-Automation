@@ -59,7 +59,10 @@ function Test-ADUserProvisioning {
         [string]$LastName,
 
         [Parameter(Mandatory)]
-        [string]$SamAccountName
+        [string]$SamAccountName,
+
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
     )
 
     $Errors = @()
@@ -76,8 +79,14 @@ function Test-ADUserProvisioning {
         $Errors += "O SamAccountName não pode estar vazio."
     }
 
-    if ($SamAccountName.Length -gt 20) {
-        $Errors += "O SamAccountName não pode possuir mais de 20 caracteres."
+    $MaxLength = [int]$Configuration.SamAccountName.MaxLength
+
+    if ($MaxLength -le 0) {
+        $Errors += "O valor 'SamAccountName.MaxLength' deve ser maior que zero."
+    }
+
+    if ($SamAccountName.Length -gt $MaxLength) {
+        $Errors += "O SamAccountName não pode possuir mais de $MaxLength caracteres."
     }
 
     if ($SamAccountName -notmatch '^[a-zA-Z0-9._-]+$') {
@@ -90,7 +99,6 @@ function Test-ADUserProvisioning {
 
     return $true
 }
-
 function Get-ADSamAccountName {
     param (
         [Parameter(Mandatory)]
