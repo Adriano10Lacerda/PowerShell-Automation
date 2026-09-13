@@ -725,6 +725,123 @@ function Get-UniqueADSamAccountName {
     }
 }
 
+# ============================================
+# Provisionar usuário no Active Directory
+# ============================================
+
+function New-ADUserProvision {
+    param (
+        [Parameter(Mandatory)]
+        [PSCustomObject]$User,
+
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    # ========================================
+    # Modo de simulação
+    # ========================================
+
+    if ($Configuration.OfflineSimulation -eq $true) {
+
+        Write-Host ""
+        Write-Host "********** MODO SIMULAÇÃO **********" -ForegroundColor Yellow
+        Write-Host ""
+
+        Write-Host "Usuário que seria criado:"
+        Write-Host "Nome:              $($User.DisplayName)"
+        Write-Host "SamAccountName:    $($User.SamAccountName)"
+        Write-Host "UserPrincipalName: $($User.UserPrincipalName)"
+        Write-Host "Tipo:              $($User.UserType)"
+        Write-Host "Domínio:           $($Configuration.Domain)"
+        Write-Host "Domain Controller: $($Configuration.DomainController)"
+        Write-Host "Target OU:         $($Configuration.TargetOU)"
+        Write-Host ""
+
+        Write-Host "Nenhuma alteração foi realizada no Active Directory." -ForegroundColor Green
+
+        return [PSCustomObject]@{
+            Success = $true
+            Simulation = $true
+            SamAccountName = $User.SamAccountName
+            Message = "Provisionamento executado em modo de simulação."
+        }
+    }
+
+    # ========================================
+    # Validar Domain Controller
+    # ========================================
+
+    if ([string]::IsNullOrWhiteSpace($Configuration.DomainController)) {
+
+        throw "O campo 'DomainController' deve ser configurado para realizar o provisionamento real."
+    }
+
+    # ========================================
+    # Validar Target OU
+    # ========================================
+
+    if ([string]::IsNullOrWhiteSpace($Configuration.TargetOU)) {
+
+        throw "O campo 'TargetOU' deve ser configurado para realizar o provisionamento real."
+    }
+
+    # ========================================
+    # Verificar conectividade
+    # ========================================
+
+    $ADConnectivity = Test-ADConnectivity `
+        -Configuration $Configuration `
+        -ErrorAction Stop
+
+    if (-not $ADConnectivity.Connected) {
+
+        throw "O Active Directory não está disponível para realizar o provisionamento."
+    }
+
+    # ========================================
+    # Verificar duplicidade
+    # ========================================
+
+    if (Test-ADUserExists -SamAccountName $User.SamAccountName) {
+
+        throw "O usuário '$($User.SamAccountName)' já existe no Active Directory."
+    }
+
+    # ========================================
+    # Criar usuário
+    # ========================================
+
+    try {
+
+        $ADUserParameters = @{
+            Name              = $User.DisplayName
+            GivenName         = $User.FirstName
+            Surname           = $User.LastName
+            DisplayName       = $User.DisplayName
+            SamAccountName    = $User.SamAccountName
+            UserPrincipalName = $User.UserPrincipalName
+            Path              = $Configuration.TargetOU
+            Server            = $Configuration.DomainController
+            Enabled           = $false
+            ErrorAction       = "Stop"
+        }
+
+        $CreatedUser = New-ADUser @ADUserParameters -PassThru
+
+        return [PSCustomObject]@{
+            Success = $true
+            Simulation = $false
+            SamAccountName = $CreatedUser.SamAccountName
+            DistinguishedName = $CreatedUser.DistinguishedName
+            Message = "Usuário criado com sucesso no Active Directory."
+        }
+    }
+    catch {
+
+        throw "Não foi possível criar o usuário '$($User.SamAccountName)' no Active Directory. Detalhes: $($_.Exception.Message)"
+    }
+}
 
 # ============================================
 # Exportar funções
@@ -736,4 +853,5 @@ Export-ModuleMember -Function `
     Test-ADUserExists, `
     Test-ADUserProvisioning, `
     Get-ADSamAccountName, `
-    Get-UniqueADSamAccountName
+    Get-UniqueADSamAccountName, `
+    New-ADUserProvision

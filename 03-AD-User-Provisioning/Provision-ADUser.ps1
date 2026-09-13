@@ -268,34 +268,67 @@ else {
 $SamAccountName = $UniqueSamAccountName
 
 # ============================================
+# User Principal Name
+# ============================================
+
+$UserPrincipalName = $null
+
+if ($Configuration.UserPrincipalName.Enabled) {
+
+    if ([string]::IsNullOrWhiteSpace($Configuration.UserPrincipalName.Domain)) {
+
+        Write-Host ""
+        Write-Host "ERRO: O domínio do UserPrincipalName não foi configurado." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "A operação foi interrompida." -ForegroundColor Yellow
+
+        exit 1
+    }
+
+    $UserPrincipalName = "$SamAccountName@$($Configuration.UserPrincipalName.Domain)"
+}
+
+# ============================================
 # Objeto final de provisionamento
 # ============================================
 
 $User = [PSCustomObject]@{
-    FirstName      = $FirstName
-    LastName       = $LastName
-    DisplayName    = $DisplayName
-    UserType       = $UserType
-    SamAccountName = $SamAccountName
+    FirstName         = $FirstName
+    LastName          = $LastName
+    DisplayName       = $DisplayName
+    UserType          = $UserType
+    SamAccountName    = $SamAccountName
+    UserPrincipalName = $UserPrincipalName
 }
 
 # ============================================
-# Modo de simulação
+# Provisionamento do usuário
 # ============================================
 
-if ($Configuration.SimulationMode -eq $true) {
+try {
+
+    $ProvisioningResult = New-ADUserProvision `
+        -User $User `
+        -Configuration $Configuration `
+        -ErrorAction Stop
 
     Write-Host ""
-    Write-Host "********** MODO SIMULAÇÃO **********" -ForegroundColor Yellow
+    Write-Host "RESULTADO DO PROVISIONAMENTO" -ForegroundColor Cyan
     Write-Host ""
 
-    Write-Host "Usuário que seria criado:"
-    Write-Host "Nome:              $($User.DisplayName)"
-    Write-Host "SamAccountName:    $($User.SamAccountName)"
-    Write-Host "Domínio:           $($Configuration.Domain)"
-    Write-Host "Domain Controller: $($Configuration.DomainController)"
-    Write-Host "Target OU:         $($Configuration.TargetOU)"
+    Write-Host "Status: $($ProvisioningResult.Message)" -ForegroundColor Green
+    Write-Host "SamAccountName: $($ProvisioningResult.SamAccountName)"
     Write-Host ""
 
-    Write-Host "Nenhuma alteração foi realizada no Active Directory." -ForegroundColor Green
+}
+catch {
+
+    Write-Host ""
+    Write-Host "ERRO NO PROVISIONAMENTO:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Write-Host "A operação foi interrompida." -ForegroundColor Yellow
+    Write-Host ""
+
+    exit 1
 }
