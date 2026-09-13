@@ -112,6 +112,53 @@ function Test-ADConfiguration {
         }
     }
 
+        # ========================================
+    # User Validation
+    # ========================================
+
+    if ($null -eq $Configuration.UserValidation) {
+
+        $Errors += "A seção 'UserValidation' não foi configurada."
+    }
+    else {
+
+        # FirstName
+
+        if ($null -eq $Configuration.UserValidation.FirstName) {
+
+            $Errors += "A seção 'UserValidation.FirstName' não foi configurada."
+        }
+        else {
+
+            if ($null -eq $Configuration.UserValidation.FirstName.MinLength) {
+
+                $Errors += "O campo 'UserValidation.FirstName.MinLength' não foi configurado."
+            }
+            elseif ([int]$Configuration.UserValidation.FirstName.MinLength -le 0) {
+
+                $Errors += "O valor 'UserValidation.FirstName.MinLength' deve ser maior que zero."
+            }
+        }
+
+        # LastName
+
+        if ($null -eq $Configuration.UserValidation.LastName) {
+
+            $Errors += "A seção 'UserValidation.LastName' não foi configurada."
+        }
+        else {
+
+            if ($null -eq $Configuration.UserValidation.LastName.MinLength) {
+
+                $Errors += "O campo 'UserValidation.LastName.MinLength' não foi configurado."
+            }
+            elseif ([int]$Configuration.UserValidation.LastName.MinLength -le 0) {
+
+                $Errors += "O valor 'UserValidation.LastName.MinLength' deve ser maior que zero."
+            }
+        }
+    }
+
     # ========================================
     # Simulation
     # ========================================
