@@ -250,6 +250,86 @@ function Test-ADConfiguration {
     return $true
 }
 
+# ============================================
+# Testar conectividade com Active Directory
+# ============================================
+
+function Test-ADConnectivity {
+    param (
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    # ========================================
+    # Simulação offline
+    # ========================================
+
+    if ($Configuration.OfflineSimulation -eq $true) {
+
+        Write-Verbose "OfflineSimulation está habilitado."
+
+        return [PSCustomObject]@{
+            Connected = $false
+            Simulation = $true
+            Message = "Modo OfflineSimulation ativo. Nenhuma conexão com o Active Directory foi realizada."
+        }
+    }
+
+    # ========================================
+    # Verificar módulo ActiveDirectory
+    # ========================================
+
+    if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+
+        throw "O módulo 'ActiveDirectory' não está instalado neste computador."
+    }
+
+    try {
+
+        Import-Module ActiveDirectory -ErrorAction Stop
+    }
+    catch {
+
+        throw "Não foi possível carregar o módulo 'ActiveDirectory'. Detalhes: $($_.Exception.Message)"
+    }
+
+    # ========================================
+    # Validar Domain Controller
+    # ========================================
+
+    if ([string]::IsNullOrWhiteSpace($Configuration.DomainController)) {
+
+        throw "O campo 'DomainController' deve ser configurado quando o modo OfflineSimulation estiver desabilitado."
+    }
+
+    # ========================================
+    # Testar conexão com o AD
+    # ========================================
+
+    try {
+
+        $Domain = Get-ADDomain `
+            -Server $Configuration.DomainController `
+            -ErrorAction Stop
+
+        return [PSCustomObject]@{
+            Connected = $true
+            Simulation = $false
+            Domain = $Domain.DNSRoot
+            DomainController = $Configuration.DomainController
+            Message = "Conexão com o Active Directory estabelecida com sucesso."
+        }
+    }
+    catch {
+
+        throw (
+            "Não foi possível conectar ao Active Directory através do Domain Controller " +
+            "'$($Configuration.DomainController)'. " +
+            "Verifique conectividade de rede, DNS, credenciais e AD Web Services. " +
+            "Detalhes: $($_.Exception.Message)"
+        )
+    }
+}
 
 # ============================================
 # Verificar existência de usuário no AD
@@ -652,6 +732,7 @@ function Get-UniqueADSamAccountName {
 
 Export-ModuleMember -Function `
     Test-ADConfiguration, `
+    Test-ADConnectivity, `
     Test-ADUserExists, `
     Test-ADUserProvisioning, `
     Get-ADSamAccountName, `

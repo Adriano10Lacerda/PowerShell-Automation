@@ -30,6 +30,43 @@ $Configuration = Get-Content $ConfigurationPath -Raw | ConvertFrom-Json
 
 Test-ADConfiguration -Configuration $Configuration | Out-Null
 
+# ========================================
+# Testar conectividade com Active Directory
+# ========================================
+
+try {
+
+    $ADConnectivity = Test-ADConnectivity `
+        -Configuration $Configuration `
+        -ErrorAction Stop
+
+    if ($ADConnectivity.Simulation) {
+
+        Write-Host ""
+        Write-Host "Conectividade AD: MODO SIMULAÇÃO" -ForegroundColor Yellow
+        Write-Host $ADConnectivity.Message
+        Write-Host ""
+    }
+    else {
+
+        Write-Host ""
+        Write-Host "Conectividade AD: OK" -ForegroundColor Green
+        Write-Host $ADConnectivity.Message
+        Write-Host ""
+    }
+}
+catch {
+
+    Write-Host ""
+    Write-Host "ERRO DE CONECTIVIDADE COM ACTIVE DIRECTORY:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Write-Host "A operação foi interrompida por segurança." -ForegroundColor Yellow
+    Write-Host ""
+
+    exit 1
+}
+
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "      AD USER PROVISIONING" -ForegroundColor Cyan
