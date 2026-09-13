@@ -258,33 +258,76 @@ function Test-ADUserProvisioning {
 
     $Errors = @()
 
+    # ========================================
+    # Primeiro nome
+    # ========================================
+
     if ([string]::IsNullOrWhiteSpace($FirstName)) {
+
         $Errors += "O primeiro nome não pode estar vazio."
     }
+    else {
+
+        $FirstNameMinLength = [int]$Configuration.UserValidation.FirstName.MinLength
+
+        if ($FirstName.Trim().Length -lt $FirstNameMinLength) {
+
+            $Errors += "O primeiro nome deve possuir pelo menos $FirstNameMinLength caracteres."
+        }
+    }
+
+    # ========================================
+    # Sobrenome
+    # ========================================
 
     if ([string]::IsNullOrWhiteSpace($LastName)) {
+
         $Errors += "O sobrenome não pode estar vazio."
     }
+    else {
+
+        $LastNameMinLength = [int]$Configuration.UserValidation.LastName.MinLength
+
+        if ($LastName.Trim().Length -lt $LastNameMinLength) {
+
+            $Errors += "O sobrenome deve possuir pelo menos $LastNameMinLength caracteres."
+        }
+    }
+
+    # ========================================
+    # SamAccountName
+    # ========================================
 
     if ([string]::IsNullOrWhiteSpace($SamAccountName)) {
+
         $Errors += "O SamAccountName não pode estar vazio."
     }
+    else {
 
-    $MaxLength = [int]$Configuration.SamAccountName.MaxLength
+        $MaxLength = [int]$Configuration.SamAccountName.MaxLength
 
-    if ($MaxLength -le 0) {
-        $Errors += "O valor 'SamAccountName.MaxLength' deve ser maior que zero."
+        if ($MaxLength -le 0) {
+
+            $Errors += "O valor 'SamAccountName.MaxLength' deve ser maior que zero."
+        }
+
+        if ($SamAccountName.Length -gt $MaxLength) {
+
+            $Errors += "O SamAccountName não pode possuir mais de $MaxLength caracteres."
+        }
+
+        if ($SamAccountName -notmatch '^[a-zA-Z0-9._-]+$') {
+
+            $Errors += "O SamAccountName contém caracteres inválidos. Use apenas letras, números, ponto, hífen ou underline."
+        }
     }
 
-    if ($SamAccountName.Length -gt $MaxLength) {
-        $Errors += "O SamAccountName não pode possuir mais de $MaxLength caracteres."
-    }
-
-    if ($SamAccountName -notmatch '^[a-zA-Z0-9._-]+$') {
-        $Errors += "O SamAccountName contém caracteres inválidos. Use apenas letras, números, ponto, hífen ou underline."
-    }
+    # ========================================
+    # Resultado
+    # ========================================
 
     if ($Errors.Count -gt 0) {
+
         throw ($Errors -join "`n")
     }
 

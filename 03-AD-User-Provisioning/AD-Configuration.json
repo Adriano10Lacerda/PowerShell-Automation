@@ -5,6 +5,15 @@
     "SimulationMode": true,
     "OfflineSimulation": true,
 
+    "UserValidation": {
+    "FirstName": {
+        "MinLength": 2
+    },
+    "LastName": {
+        "MinLength": 2
+    }
+    },
+
     "Simulation": {
         "ExistingSamAccountNames": [
             "silva.maria.ext",
