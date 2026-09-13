@@ -46,7 +46,57 @@ Write-Host ""
 
 $FirstName = Read-Host "Digite o primeiro nome"
 $LastName = Read-Host "Digite o sobrenome"
-$SamAccountName = Read-Host "Digite o SamAccountName"
+
+Write-Host ""
+Write-Host "Tipos de usuário disponíveis:" -ForegroundColor Cyan
+
+$UserTypeKeys = @($Configuration.UserTypes.PSObject.Properties.Name)
+
+for ($i = 0; $i -lt $UserTypeKeys.Count; $i++) {
+    $Key = $UserTypeKeys[$i]
+    $Description = $Configuration.UserTypes.$Key.Description
+
+    Write-Host "$($i + 1) - $Description"
+}
+
+Write-Host ""
+
+$UserTypeSelection = Read-Host "Escolha o tipo de usuário"
+
+if (-not ($UserTypeSelection -match '^\d+$')) {
+    Write-Host ""
+    Write-Host "ERRO: Escolha um número válido." -ForegroundColor Red
+    exit 1
+}
+
+$UserTypeIndex = [int]$UserTypeSelection - 1
+
+if ($UserTypeIndex -lt 0 -or $UserTypeIndex -ge $UserTypeKeys.Count) {
+    Write-Host ""
+    Write-Host "ERRO: Tipo de usuário inválido." -ForegroundColor Red
+    exit 1
+}
+
+$UserType = $UserTypeKeys[$UserTypeIndex]
+
+# Gerar SamAccountName automaticamente
+try {
+    $SamAccountName = Get-ADSamAccountName `
+        -FirstName $FirstName `
+        -LastName $LastName `
+        -UserType $UserType `
+        -Configuration $Configuration
+}
+catch {
+    Write-Host ""
+    Write-Host "ERRO AO GERAR SAMACCOUNTNAME:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    exit 1
+}
+
+Write-Host ""
+Write-Host "SamAccountName gerado: $SamAccountName" -ForegroundColor Green
 
 # ============================================
 # Validação dos dados
@@ -71,7 +121,7 @@ catch {
 $DisplayName = "$FirstName $LastName"
 
 # ============================================
-# Verificar usuário existente
+# Verificar disponibilidade do SamAccountName
 # ============================================
 
 if ($Configuration.OfflineSimulation -eq $true) {
@@ -83,18 +133,33 @@ if ($Configuration.OfflineSimulation -eq $true) {
     Write-Host "O sistema está executando em ambiente local."
     Write-Host ""
 
+    try {
+        $UniqueSamAccountName = Get-UniqueADSamAccountName `
+            -SamAccountName $SamAccountName `
+            -Configuration $Configuration
+    }
+    catch {
+        Write-Host ""
+        Write-Host "ERRO AO VALIDAR SAMACCOUNTNAME:" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        Write-Host ""
+        exit 1
+    }
+
 }
 else {
 
     Write-Host ""
-    Write-Host "Verificando se o usuário já existe..." -ForegroundColor Cyan
+    Write-Host "Verificando disponibilidade do SamAccountName..." -ForegroundColor Cyan
 
     try {
-        $UserExists = Test-ADUserExists -SamAccountName $SamAccountName
+        $UniqueSamAccountName = Get-UniqueADSamAccountName `
+            -SamAccountName $SamAccountName `
+            -Configuration $Configuration
     }
     catch {
         Write-Host ""
-        Write-Host "ERRO: Não foi possível consultar o Active Directory." -ForegroundColor Red
+        Write-Host "ERRO: Não foi possível verificar a disponibilidade do usuário." -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
         Write-Host ""
         Write-Host "A operação foi interrompida por segurança." -ForegroundColor Yellow
@@ -102,15 +167,20 @@ else {
         exit 1
     }
 
-    if ($UserExists) {
-        Write-Host ""
-        Write-Host "ERRO: O usuário '$SamAccountName' já existe no Active Directory." -ForegroundColor Red
-        Write-Host "A criação foi bloqueada para evitar duplicidade." -ForegroundColor Red
+    if ($UniqueSamAccountName -ne $SamAccountName) {
 
-        exit 1
+        Write-Host ""
+        Write-Host "O SamAccountName '$SamAccountName' já está em uso." -ForegroundColor Yellow
+        Write-Host "Novo SamAccountName disponível: '$UniqueSamAccountName'" -ForegroundColor Green
+        Write-Host ""
+
+    }
+    else {
+
+        Write-Host "SamAccountName disponível: $UniqueSamAccountName" -ForegroundColor Green
     }
 
-    Write-Host "Usuário não encontrado. Pode continuar." -ForegroundColor Green
+    $SamAccountName = $UniqueSamAccountName
 }
 
 # ============================================
