@@ -5,6 +5,14 @@
     "SimulationMode": true,
     "OfflineSimulation": true,
 
+    "Simulation": {
+        "ExistingSamAccountNames": [
+            "silva.maria.ext",
+            "silva.maria2.ext",
+            "silva.maria3.ext"
+        ]
+    },
+
     "SamAccountName": {
         "Enabled": true,
         "MaxLength": 20,
@@ -17,8 +25,8 @@
     },
 
     "LongNamePolicy": {
-    "Enabled": true,
-    "Strategy": "Manual"
+        "Enabled": true,
+        "Strategy": "Manual"
     },
 
     "UserTypes": {

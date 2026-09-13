@@ -1,3 +1,11 @@
+# ============================================
+# AD Functions
+# ============================================
+
+# ============================================
+# Validar configuração do Active Directory
+# ============================================
+
 function Test-ADConfiguration {
     param (
         [Parameter(Mandatory)]
@@ -6,25 +14,199 @@ function Test-ADConfiguration {
 
     $Errors = @()
 
+    # ========================================
+    # Domain
+    # ========================================
+
     if ([string]::IsNullOrWhiteSpace($Configuration.Domain)) {
         $Errors += "O campo 'Domain' não pode estar vazio."
     }
+
+    # ========================================
+    # Domain Controller
+    # ========================================
 
     if (-not [string]::IsNullOrWhiteSpace($Configuration.DomainController)) {
         Write-Verbose "Domain Controller configurado: $($Configuration.DomainController)"
     }
 
+    # ========================================
+    # Target OU
+    # ========================================
+
     if (-not [string]::IsNullOrWhiteSpace($Configuration.TargetOU)) {
         Write-Verbose "OU configurada: $($Configuration.TargetOU)"
     }
 
+    # ========================================
+    # SamAccountName
+    # ========================================
+
+    if ($null -eq $Configuration.SamAccountName) {
+        $Errors += "A seção 'SamAccountName' não foi configurada."
+    }
+    else {
+
+        if ($null -eq $Configuration.SamAccountName.Enabled) {
+            $Errors += "O campo 'SamAccountName.Enabled' não foi configurado."
+        }
+
+        if ($null -eq $Configuration.SamAccountName.MaxLength) {
+            $Errors += "O campo 'SamAccountName.MaxLength' não foi configurado."
+        }
+        elseif ([int]$Configuration.SamAccountName.MaxLength -le 0) {
+            $Errors += "O valor 'SamAccountName.MaxLength' deve ser maior que zero."
+        }
+
+        if ($null -eq $Configuration.SamAccountName.RemoveAccents) {
+            $Errors += "O campo 'SamAccountName.RemoveAccents' não foi configurado."
+        }
+    }
+
+    # ========================================
+    # Duplicate Handling
+    # ========================================
+
+    if ($null -eq $Configuration.DuplicateHandling) {
+        $Errors += "A seção 'DuplicateHandling' não foi configurada."
+    }
+    else {
+
+        if ($null -eq $Configuration.DuplicateHandling.Enabled) {
+            $Errors += "O campo 'DuplicateHandling.Enabled' não foi configurado."
+        }
+
+        if ([string]::IsNullOrWhiteSpace(
+            [string]$Configuration.DuplicateHandling.Strategy
+        )) {
+            $Errors += "O campo 'DuplicateHandling.Strategy' não pode estar vazio."
+        }
+        elseif ($Configuration.DuplicateHandling.Strategy -notin @("Increment")) {
+            $Errors += "A estratégia de duplicidade '$($Configuration.DuplicateHandling.Strategy)' não é suportada."
+        }
+    }
+
+    # ========================================
+    # Long Name Policy
+    # ========================================
+
+    if ($null -eq $Configuration.LongNamePolicy) {
+        $Errors += "A seção 'LongNamePolicy' não foi configurada."
+    }
+    else {
+
+        if ($null -eq $Configuration.LongNamePolicy.Enabled) {
+            $Errors += "O campo 'LongNamePolicy.Enabled' não foi configurado."
+        }
+
+        if ([string]::IsNullOrWhiteSpace(
+            [string]$Configuration.LongNamePolicy.Strategy
+        )) {
+            $Errors += "O campo 'LongNamePolicy.Strategy' não pode estar vazio."
+        }
+        elseif ($Configuration.LongNamePolicy.Strategy -notin @(
+            "Manual",
+            "Truncate"
+        )) {
+            $Errors += "A estratégia de nome longo '$($Configuration.LongNamePolicy.Strategy)' não é suportada."
+        }
+    }
+
+    # ========================================
+    # Simulation
+    # ========================================
+
+    if ($Configuration.OfflineSimulation -eq $true) {
+
+        if ($null -eq $Configuration.Simulation) {
+            $Errors += "A seção 'Simulation' deve ser configurada quando 'OfflineSimulation' está habilitado."
+        }
+        else {
+
+            if ($null -eq $Configuration.Simulation.ExistingSamAccountNames) {
+                $Errors += "O campo 'Simulation.ExistingSamAccountNames' não foi configurado."
+            }
+        }
+    }
+
+    # ========================================
+    # User Types
+    # ========================================
+
+    if ($null -eq $Configuration.UserTypes) {
+
+        $Errors += "A seção 'UserTypes' não foi configurada."
+    }
+    else {
+
+        $UserTypeProperties = @(
+            $Configuration.UserTypes.PSObject.Properties
+        )
+
+        if ($UserTypeProperties.Count -eq 0) {
+
+            $Errors += "A seção 'UserTypes' deve possuir pelo menos um tipo de usuário."
+        }
+        else {
+
+            foreach ($UserTypeProperty in $UserTypeProperties) {
+
+                $UserTypeName = $UserTypeProperty.Name
+                $UserTypeConfiguration = $UserTypeProperty.Value
+
+                if ($null -eq $UserTypeConfiguration) {
+                    $Errors += "A configuração do tipo de usuário '$UserTypeName' está vazia."
+                    continue
+                }
+
+                if ([string]::IsNullOrWhiteSpace(
+                    [string]$UserTypeConfiguration.Description
+                )) {
+                    $Errors += "O campo 'Description' do tipo '$UserTypeName' não pode estar vazio."
+                }
+
+                if ([string]::IsNullOrWhiteSpace(
+                    [string]$UserTypeConfiguration.Format
+                )) {
+                    $Errors += "O campo 'Format' do tipo '$UserTypeName' não pode estar vazio."
+                }
+                elseif ($UserTypeConfiguration.Format -notin @(
+                    "FirstName.LastName",
+                    "LastName.FirstName",
+                    "FirstNameLastName",
+                    "LastNameFirstName",
+                    "FirstInitial.LastName"
+                )) {
+                    $Errors += "O formato '$($UserTypeConfiguration.Format)' do tipo '$UserTypeName' não é suportado."
+                }
+
+                if ($null -eq $UserTypeConfiguration.Suffix) {
+                    $Errors += "O campo 'Suffix' do tipo '$UserTypeName' não foi configurado."
+                }
+            }
+        }
+    }
+
+    # ========================================
+    # Resultado
+    # ========================================
+
     if ($Errors.Count -gt 0) {
-        throw ($Errors -join "`n")
+
+        throw (
+            "A configuração do Active Directory contém erros:" +
+            "`n" +
+            ($Errors | ForEach-Object { "- $_" } | Out-String).TrimEnd()
+        )
     }
 
     return $true
 }
 
+
+# ============================================
+# Verificar existência de usuário no AD
+# ============================================
 
 function Test-ADUserExists {
     param (
@@ -33,7 +215,10 @@ function Test-ADUserExists {
     )
 
     try {
-        $User = Get-ADUser -Identity $SamAccountName -ErrorAction Stop
+
+        $User = Get-ADUser `
+            -Identity $SamAccountName `
+            -ErrorAction Stop
 
         if ($null -ne $User) {
             return $true
@@ -42,13 +227,19 @@ function Test-ADUserExists {
         return $false
     }
     catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+
         return $false
     }
     catch {
+
         throw "Não foi possível consultar o Active Directory para verificar o usuário '$SamAccountName'. Detalhes: $($_.Exception.Message)"
     }
 }
 
+
+# ============================================
+# Validar dados do usuário
+# ============================================
 
 function Test-ADUserProvisioning {
     param (
@@ -99,6 +290,12 @@ function Test-ADUserProvisioning {
 
     return $true
 }
+
+
+# ============================================
+# Gerar SamAccountName
+# ============================================
+
 function Get-ADSamAccountName {
     param (
         [Parameter(Mandatory)]
@@ -133,6 +330,7 @@ function Get-ADSamAccountName {
 
     # Remove acentos quando configurado.
     if ($Configuration.SamAccountName.RemoveAccents) {
+
         $FirstNameClean = $FirstNameClean.Normalize(
             [Text.NormalizationForm]::FormD
         ) -replace '\p{Mn}', ''
@@ -192,21 +390,26 @@ function Get-ADSamAccountName {
 
     if ($BaseSamAccountName.Length -gt $AvailableLength) {
 
-    if (
-        $Configuration.LongNamePolicy.Enabled -and
-        $Configuration.LongNamePolicy.Strategy -eq "Manual"
-    ) {
-        throw "O SamAccountName gerado '$BaseSamAccountName$Suffix' ultrapassa o limite configurado de $MaxLength caracteres. É necessário informar manualmente um SamAccountName válido."
+        if (
+            $Configuration.LongNamePolicy.Enabled -and
+            $Configuration.LongNamePolicy.Strategy -eq "Manual"
+        ) {
+            throw "O SamAccountName gerado '$BaseSamAccountName$Suffix' ultrapassa o limite configurado de $MaxLength caracteres. É necessário informar manualmente um SamAccountName válido."
+        }
+
+        $BaseSamAccountName = $BaseSamAccountName.Substring(
+            0,
+            $AvailableLength
+        )
     }
 
-    $BaseSamAccountName = $BaseSamAccountName.Substring(
-        0,
-        $AvailableLength
-    )
+    return "$BaseSamAccountName$Suffix"
 }
 
-return "$BaseSamAccountName$Suffix"
-}
+
+# ============================================
+# Gerar SamAccountName único
+# ============================================
 
 function Get-UniqueADSamAccountName {
     param (
@@ -260,7 +463,7 @@ function Get-UniqueADSamAccountName {
         )
     }
 
-    # Primeiro verifica se o nome original está disponível.
+    # Verifica se o nome original está disponível.
     if ($ExistingSamAccountNames -notcontains $SamAccountName) {
 
         if ($Configuration.OfflineSimulation) {
@@ -268,21 +471,26 @@ function Get-UniqueADSamAccountName {
         }
 
         try {
-            $User = Get-ADUser -Identity $SamAccountName -ErrorAction Stop
+
+            $User = Get-ADUser `
+                -Identity $SamAccountName `
+                -ErrorAction Stop
 
             if ($null -eq $User) {
                 return $SamAccountName
             }
         }
         catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+
             return $SamAccountName
         }
         catch {
+
             throw "Não foi possível verificar a disponibilidade do SamAccountName '$SamAccountName'. Detalhes: $($_.Exception.Message)"
         }
     }
 
-    # Nome original ocupado. Começa a procurar pelo próximo número.
+    # Nome original ocupado.
     $Counter = 2
 
     while ($true) {
@@ -301,6 +509,7 @@ function Get-UniqueADSamAccountName {
         $AdjustedBaseName = $BaseName
 
         if ($AdjustedBaseName.Length -gt $AvailableBaseLength) {
+
             $AdjustedBaseName = $AdjustedBaseName.Substring(
                 0,
                 $AvailableBaseLength
@@ -311,7 +520,7 @@ function Get-UniqueADSamAccountName {
 
         Write-Verbose "Verificando disponibilidade: $Candidate"
 
-        # Simulação offline utilizando lista fornecida para teste.
+        # Simulação offline.
         if ($Configuration.OfflineSimulation) {
 
             if ($ExistingSamAccountNames -notcontains $Candidate) {
@@ -322,9 +531,12 @@ function Get-UniqueADSamAccountName {
             continue
         }
 
-        # Consulta ao Active Directory real.
+        # Active Directory real.
         try {
-            $User = Get-ADUser -Identity $Candidate -ErrorAction Stop
+
+            $User = Get-ADUser `
+                -Identity $Candidate `
+                -ErrorAction Stop
 
             if ($null -eq $User) {
                 return $Candidate
@@ -333,12 +545,24 @@ function Get-UniqueADSamAccountName {
             $Counter++
         }
         catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+
             return $Candidate
         }
         catch {
+
             throw "Não foi possível verificar a disponibilidade do SamAccountName '$Candidate'. Detalhes: $($_.Exception.Message)"
         }
     }
 }
 
-Export-ModuleMember -Function Test-ADConfiguration, Test-ADUserExists, Test-ADUserProvisioning, Get-ADSamAccountName, Get-UniqueADSamAccountName
+
+# ============================================
+# Exportar funções
+# ============================================
+
+Export-ModuleMember -Function `
+    Test-ADConfiguration, `
+    Test-ADUserExists, `
+    Test-ADUserProvisioning, `
+    Get-ADSamAccountName, `
+    Get-UniqueADSamAccountName

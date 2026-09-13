@@ -172,63 +172,74 @@ $DisplayName = "$FirstName $LastName"
 # Verificar disponibilidade do SamAccountName
 # ============================================
 
-if ($Configuration.OfflineSimulation -eq $true) {
+Write-Host ""
+Write-Host "Verificando disponibilidade do SamAccountName..." -ForegroundColor Cyan
 
-    Write-Host ""
-    Write-Host "********** SIMULAÇÃO OFFLINE **********" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Consulta ao Active Directory desativada."
-    Write-Host "O sistema está executando em ambiente local."
-    Write-Host ""
+try {
 
-    try {
+    if ($Configuration.OfflineSimulation -eq $true) {
+
+        Write-Host ""
+        Write-Host "********** SIMULAÇÃO OFFLINE **********" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Consulta ao Active Directory desativada."
+        Write-Host "O sistema está executando em ambiente local."
+        Write-Host ""
+
+        $UniqueSamAccountName = Get-UniqueADSamAccountName `
+            -SamAccountName $SamAccountName `
+            -Configuration $Configuration `
+            -ExistingSamAccountNames $Configuration.Simulation.ExistingSamAccountNames
+    }
+    else {
+
         $UniqueSamAccountName = Get-UniqueADSamAccountName `
             -SamAccountName $SamAccountName `
             -Configuration $Configuration
     }
-    catch {
-        Write-Host ""
-        Write-Host "ERRO AO VALIDAR SAMACCOUNTNAME:" -ForegroundColor Red
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        Write-Host ""
-        exit 1
-    }
+
+}
+catch {
+
+    Write-Host ""
+    Write-Host "ERRO AO VERIFICAR DISPONIBILIDADE:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Write-Host "A operação foi interrompida por segurança." -ForegroundColor Yellow
+
+    exit 1
+}
+
+# ============================================
+# Verificar se houve alteração
+# ============================================
+
+if ($UniqueSamAccountName -ne $SamAccountName) {
+
+    Write-Host ""
+    Write-Host "O SamAccountName '$SamAccountName' já está em uso." -ForegroundColor Yellow
+    Write-Host "Novo SamAccountName disponível: '$UniqueSamAccountName'" -ForegroundColor Green
+    Write-Host ""
 
 }
 else {
 
     Write-Host ""
-    Write-Host "Verificando disponibilidade do SamAccountName..." -ForegroundColor Cyan
+    Write-Host "SamAccountName disponível: $UniqueSamAccountName" -ForegroundColor Green
+}
 
-    try {
-        $UniqueSamAccountName = Get-UniqueADSamAccountName `
-            -SamAccountName $SamAccountName `
-            -Configuration $Configuration
-    }
-    catch {
-        Write-Host ""
-        Write-Host "ERRO: Não foi possível verificar a disponibilidade do usuário." -ForegroundColor Red
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        Write-Host ""
-        Write-Host "A operação foi interrompida por segurança." -ForegroundColor Yellow
+$SamAccountName = $UniqueSamAccountName
 
-        exit 1
-    }
+# ============================================
+# Objeto final de provisionamento
+# ============================================
 
-    if ($UniqueSamAccountName -ne $SamAccountName) {
-
-        Write-Host ""
-        Write-Host "O SamAccountName '$SamAccountName' já está em uso." -ForegroundColor Yellow
-        Write-Host "Novo SamAccountName disponível: '$UniqueSamAccountName'" -ForegroundColor Green
-        Write-Host ""
-
-    }
-    else {
-
-        Write-Host "SamAccountName disponível: $UniqueSamAccountName" -ForegroundColor Green
-    }
-
-    $SamAccountName = $UniqueSamAccountName
+$User = [PSCustomObject]@{
+    FirstName      = $FirstName
+    LastName       = $LastName
+    DisplayName    = $DisplayName
+    UserType       = $UserType
+    SamAccountName = $SamAccountName
 }
 
 # ============================================
@@ -242,8 +253,8 @@ if ($Configuration.SimulationMode -eq $true) {
     Write-Host ""
 
     Write-Host "Usuário que seria criado:"
-    Write-Host "Nome:              $DisplayName"
-    Write-Host "SamAccountName:    $SamAccountName"
+    Write-Host "Nome:              $($User.DisplayName)"
+    Write-Host "SamAccountName:    $($User.SamAccountName)"
     Write-Host "Domínio:           $($Configuration.Domain)"
     Write-Host "Domain Controller: $($Configuration.DomainController)"
     Write-Host "Target OU:         $($Configuration.TargetOU)"
