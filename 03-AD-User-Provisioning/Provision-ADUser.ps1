@@ -88,11 +88,55 @@ try {
         -Configuration $Configuration
 }
 catch {
-    Write-Host ""
-    Write-Host "ERRO AO GERAR SAMACCOUNTNAME:" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host ""
-    exit 1
+
+    if (
+        $Configuration.LongNamePolicy.Enabled -and
+        $Configuration.LongNamePolicy.Strategy -eq "Manual" -and
+        $_.Exception.Message -like "*ultrapassa o limite configurado*"
+    ) {
+
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Yellow
+        Write-Host "      SAMACCOUNTNAME MUITO LONGO" -ForegroundColor Yellow
+        Write-Host "============================================" -ForegroundColor Yellow
+        Write-Host ""
+
+        Write-Host "O nome gerado automaticamente não pode ser utilizado."
+        Write-Host "Limite configurado: $($Configuration.SamAccountName.MaxLength) caracteres."
+        Write-Host ""
+
+        do {
+            $SamAccountName = Read-Host "Digite manualmente o SamAccountName"
+
+            try {
+                Test-ADUserProvisioning `
+                    -FirstName $FirstName `
+                    -LastName $LastName `
+                    -SamAccountName $SamAccountName `
+                    -Configuration $Configuration | Out-Null
+
+                $ManualNameValid = $true
+            }
+            catch {
+                $ManualNameValid = $false
+
+                Write-Host ""
+                Write-Host "ERRO: SamAccountName inválido." -ForegroundColor Red
+                Write-Host $_.Exception.Message -ForegroundColor Red
+                Write-Host ""
+            }
+
+        } until ($ManualNameValid)
+    }
+    else {
+
+        Write-Host ""
+        Write-Host "ERRO AO GERAR SAMACCOUNTNAME:" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        Write-Host ""
+
+        exit 1
+    }
 }
 
 Write-Host ""

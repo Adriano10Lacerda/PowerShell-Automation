@@ -191,13 +191,21 @@ function Get-ADSamAccountName {
     $AvailableLength = $MaxLength - $Suffix.Length
 
     if ($BaseSamAccountName.Length -gt $AvailableLength) {
-        $BaseSamAccountName = $BaseSamAccountName.Substring(
-            0,
-            $AvailableLength
-        )
+
+    if (
+        $Configuration.LongNamePolicy.Enabled -and
+        $Configuration.LongNamePolicy.Strategy -eq "Manual"
+    ) {
+        throw "O SamAccountName gerado '$BaseSamAccountName$Suffix' ultrapassa o limite configurado de $MaxLength caracteres. É necessário informar manualmente um SamAccountName válido."
     }
 
-    return "$BaseSamAccountName$Suffix"
+    $BaseSamAccountName = $BaseSamAccountName.Substring(
+        0,
+        $AvailableLength
+    )
+}
+
+return "$BaseSamAccountName$Suffix"
 }
 
 function Get-UniqueADSamAccountName {

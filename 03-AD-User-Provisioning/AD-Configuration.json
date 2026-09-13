@@ -16,6 +16,11 @@
         "Strategy": "Increment"
     },
 
+    "LongNamePolicy": {
+    "Enabled": true,
+    "Strategy": "Manual"
+    },
+
     "UserTypes": {
         "Employee": {
             "Description": "Funcionário",
