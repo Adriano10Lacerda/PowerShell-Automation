@@ -678,6 +678,7 @@ function Get-UniqueADSamAccountName {
 
             $User = Get-ADUser `
                 -Identity $SamAccountName `
+                -Server $Configuration.DomainController `
                 -ErrorAction Stop
 
             if ($null -eq $User) {
@@ -740,6 +741,7 @@ function Get-UniqueADSamAccountName {
 
             $User = Get-ADUser `
                 -Identity $Candidate `
+                -Server $Configuration.DomainController `
                 -ErrorAction Stop
 
             if ($null -eq $User) {
