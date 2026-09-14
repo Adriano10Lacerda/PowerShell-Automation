@@ -22,18 +22,6 @@ function Test-ADConfiguration {
         $Errors += "O campo 'SimulationMode' não foi configurado."
     }
 
-    if ($null -eq $Configuration.OfflineSimulation) {
-        $Errors += "O campo 'OfflineSimulation' não foi configurado."
-    }
-
-    if (
-        $null -ne $Configuration.SimulationMode -and
-        $null -ne $Configuration.OfflineSimulation -and
-        $Configuration.SimulationMode -ne $Configuration.OfflineSimulation
-    ) {
-        $Errors += "Os campos 'SimulationMode' e 'OfflineSimulation' devem possuir o mesmo valor."
-    }
-
     # ========================================
     # Domain
     # ========================================
@@ -209,10 +197,10 @@ function Test-ADConfiguration {
     # Simulation
     # ========================================
 
-    if ($Configuration.OfflineSimulation -eq $true) {
+    if ($Configuration.SimulationMode -eq $true) {
 
         if ($null -eq $Configuration.Simulation) {
-            $Errors += "A seção 'Simulation' deve ser configurada quando 'OfflineSimulation' está habilitado."
+            $Errors += "A seção 'Simulation' deve ser configurada quando 'SimulationMode' está habilitado."
         }
         else {
 
@@ -310,14 +298,14 @@ function Test-ADConnectivity {
     # Simulação offline
     # ========================================
 
-    if ($Configuration.OfflineSimulation -eq $true) {
+    if ($Configuration.SimulationMode -eq $true) {
 
-        Write-Verbose "OfflineSimulation está habilitado."
+        Write-Verbose "SimulationMode está habilitado."
 
         return [PSCustomObject]@{
             Connected = $false
             Simulation = $true
-            Message = "Modo OfflineSimulation ativo. Nenhuma conexão com o Active Directory foi realizada."
+            Message = "Modo de simulação ativo. Nenhuma conexão com o Active Directory foi realizada."
         }
     }
 
@@ -345,7 +333,7 @@ function Test-ADConnectivity {
 
     if ([string]::IsNullOrWhiteSpace($Configuration.DomainController)) {
 
-        throw "O campo 'DomainController' deve ser configurado quando o modo OfflineSimulation estiver desabilitado."
+        throw "O campo 'DomainController' deve ser configurado quando o modo de simulação estiver desabilitado."
     }
 
     # ========================================
@@ -682,7 +670,7 @@ function Get-UniqueADSamAccountName {
     # Verifica se o nome original está disponível.
     if ($ExistingSamAccountNames -notcontains $SamAccountName) {
 
-        if ($Configuration.OfflineSimulation) {
+        if ($Configuration.SimulationMode) {
             return $SamAccountName
         }
 
@@ -737,7 +725,7 @@ function Get-UniqueADSamAccountName {
         Write-Verbose "Verificando disponibilidade: $Candidate"
 
         # Simulação offline.
-        if ($Configuration.OfflineSimulation) {
+        if ($Configuration.SimulationMode) {
 
             if ($ExistingSamAccountNames -notcontains $Candidate) {
                 return $Candidate
@@ -788,7 +776,7 @@ function New-ADUserProvision {
     # Modo de simulação
     # ========================================
 
-    if ($Configuration.OfflineSimulation -eq $true) {
+    if ($Configuration.SimulationMode -eq $true) {
 
         Write-Host ""
         Write-Host "********** MODO SIMULAÇÃO **********" -ForegroundColor Yellow

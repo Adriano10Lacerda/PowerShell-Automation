@@ -214,13 +214,13 @@ Write-Host "Verificando disponibilidade do SamAccountName..." -ForegroundColor C
 
 try {
 
-    if ($Configuration.OfflineSimulation -eq $true) {
+    if ($Configuration.SimulationMode -eq $true) {
 
         Write-Host ""
-        Write-Host "********** SIMULAÇÃO OFFLINE **********" -ForegroundColor Yellow
+        Write-Host "********** MODO DE SIMULAÇÃO **********" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Consulta ao Active Directory desativada."
-        Write-Host "O sistema está executando em ambiente local."
+        Write-Host "Consulta ao Active Directory não será realizada."
+        Write-Host "O sistema está executando em modo de simulação."
         Write-Host ""
 
         $UniqueSamAccountName = Get-UniqueADSamAccountName `
