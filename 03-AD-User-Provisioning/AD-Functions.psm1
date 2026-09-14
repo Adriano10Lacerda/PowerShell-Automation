@@ -15,6 +15,26 @@ function Test-ADConfiguration {
     $Errors = @()
 
     # ========================================
+    # Execution Mode
+    # ========================================
+
+    if ($null -eq $Configuration.SimulationMode) {
+        $Errors += "O campo 'SimulationMode' não foi configurado."
+    }
+
+    if ($null -eq $Configuration.OfflineSimulation) {
+        $Errors += "O campo 'OfflineSimulation' não foi configurado."
+    }
+
+    if (
+        $null -ne $Configuration.SimulationMode -and
+        $null -ne $Configuration.OfflineSimulation -and
+        $Configuration.SimulationMode -ne $Configuration.OfflineSimulation
+    ) {
+        $Errors += "Os campos 'SimulationMode' e 'OfflineSimulation' devem possuir o mesmo valor."
+    }
+
+    # ========================================
     # Domain
     # ========================================
 
@@ -112,7 +132,7 @@ function Test-ADConfiguration {
         }
     }
 
-        # ========================================
+    # ========================================
     # User Validation
     # ========================================
 
@@ -155,6 +175,32 @@ function Test-ADConfiguration {
             elseif ([int]$Configuration.UserValidation.LastName.MinLength -le 0) {
 
                 $Errors += "O valor 'UserValidation.LastName.MinLength' deve ser maior que zero."
+            }
+        }
+    }
+
+        # ========================================
+    # User Principal Name
+    # ========================================
+
+    if ($null -eq $Configuration.UserPrincipalName) {
+
+        $Errors += "A seção 'UserPrincipalName' não foi configurada."
+    }
+    else {
+
+        if ($null -eq $Configuration.UserPrincipalName.Enabled) {
+
+            $Errors += "O campo 'UserPrincipalName.Enabled' não foi configurado."
+        }
+
+        if ($Configuration.UserPrincipalName.Enabled -eq $true) {
+
+            if ([string]::IsNullOrWhiteSpace(
+                [string]$Configuration.UserPrincipalName.Domain
+            )) {
+
+                $Errors += "O campo 'UserPrincipalName.Domain' deve ser configurado quando UserPrincipalName está habilitado."
             }
         }
     }
