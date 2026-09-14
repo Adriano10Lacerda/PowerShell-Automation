@@ -1,0 +1,17 @@
+{
+    "TenantId": "",
+    "Domain": "",
+    "SimulationMode": true,
+
+    "UserPrincipalName": {
+        "Enabled": true,
+        "Domain": "example.onmicrosoft.com"
+    },
+
+    "Simulation": {
+        "ExistingUserPrincipalNames": [
+            "maria.silva@example.onmicrosoft.com",
+            "joao.santos@example.onmicrosoft.com"
+        ]
+    }
+}
