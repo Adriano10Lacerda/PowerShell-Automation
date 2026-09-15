@@ -52,8 +52,6 @@ function Test-EntraConfiguration {
     return $true
 }
 
-Export-ModuleMember -Function Test-EntraConfiguration
-
 function Test-EntraUserProvisioning {
 
     param (
@@ -130,21 +128,58 @@ function Test-EntraUserExists {
     }
 
     # Modo real
-    if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Users)) {
-        throw "O módulo Microsoft.Graph.Users não está instalado."
+    if (-not (Get-Command Get-MgUser -ErrorAction SilentlyContinue)) {
+        throw "O comando 'Get-MgUser' não está disponível. Instale o Microsoft.Graph.Users e autentique-se no Microsoft Graph."
     }
 
+    # Verificar se existe um tenant Microsoft Entra
     try {
-        $User = Get-MgUser -UserId $UserPrincipalName -ErrorAction Stop
-        return ($null -ne $User)
+
+        $Organization = Invoke-MgGraphRequest `
+            -Method GET `
+            -Uri "https://graph.microsoft.com/v1.0/organization" `
+            -ErrorAction Stop
+
+        if ($null -eq $Organization.value -or $Organization.value.Count -eq 0) {
+            throw "Nenhuma organização Microsoft Entra foi encontrada."
+        }
     }
     catch {
-        if ($_.Exception.Message -match "Resource .* does not exist" -or
-            $_.Exception.Message -match "does not exist") {
+
+        $ErrorDetails = $_ | Out-String
+
+        if ($ErrorDetails -match "MSA accounts" -or
+            $ErrorDetails -match "not supported for MSA") {
+
+            throw "A conta autenticada é uma Microsoft Account (MSA). O provisionamento requer uma conta corporativa ou escolar em um tenant Microsoft Entra ID."
+        }
+
+        throw "Não foi possível validar o tenant Microsoft Entra ID. Detalhes: $($_.Exception.Message)"
+    }
+
+    # Consultar usuário no Microsoft Entra ID
+    try {
+
+        $User = Get-MgUser `
+            -UserId $UserPrincipalName `
+            -ErrorAction Stop
+
+        if ($null -eq $User) {
             return $false
         }
 
-        throw
+        return $true
+    }
+    catch {
+
+        if ($_.Exception.Message -match "Resource .* does not exist" -or
+            $_.Exception.Message -match "does not exist" -or
+            $_.Exception.Message -match "Request_ResourceNotFound") {
+
+            return $false
+        }
+
+        throw "Não foi possível verificar o usuário '$UserPrincipalName'. Detalhes: $($_.Exception.Message)"
     }
 }
 
@@ -162,7 +197,10 @@ function New-EntraUserProvision {
     Test-EntraUserProvisioning -User $User -Configuration $Configuration
 
     # Verificação de usuário existente
-    if (Test-EntraUserExists -UserPrincipalName $User.UserPrincipalName -Configuration $Configuration) {
+    if (Test-EntraUserExists `
+        -UserPrincipalName $User.UserPrincipalName `
+        -Configuration $Configuration) {
+
         throw "O usuário '$($User.UserPrincipalName)' já existe no Entra ID."
     }
 
@@ -186,4 +224,44 @@ function New-EntraUserProvision {
     throw "O modo real de provisionamento ainda não foi implementado."
 }
 
-Export-ModuleMember -Function Test-EntraConfiguration, Test-EntraUserProvisioning, Test-EntraUserExists, New-EntraUserProvision
+function Test-EntraTenantConnection {
+
+    try {
+
+        $Organization = Invoke-MgGraphRequest `
+            -Method GET `
+            -Uri "https://graph.microsoft.com/v1.0/organization" `
+            -ErrorAction Stop
+
+        if ($null -eq $Organization.value -or $Organization.value.Count -eq 0) {
+            throw "Nenhuma organização Microsoft Entra foi encontrada."
+        }
+
+        return [PSCustomObject]@{
+            Connected       = $true
+            TenantId        = $Organization.value[0].id
+            DisplayName     = $Organization.value[0].displayName
+            VerifiedDomains = $Organization.value[0].verifiedDomains
+            Message         = "Conexão com o Microsoft Entra ID validada com sucesso."
+        }
+    }
+    catch {
+
+        $ErrorDetails = $_ | Out-String
+
+        if ($ErrorDetails -match "MSA accounts" -or
+            $ErrorDetails -match "not supported for MSA") {
+
+            throw "A conta autenticada é uma Microsoft Account (MSA). O provisionamento deste módulo requer uma conta corporativa ou escolar em um tenant Microsoft Entra ID."
+        }
+
+        if ($_.Exception.Message -match "BadRequest") {
+
+            throw "Não foi possível consultar a organização Microsoft Entra ID. Verifique se a conta autenticada pertence a um tenant Microsoft Entra ID corporativo ou escolar."
+        }
+
+        throw "Não foi possível validar o tenant Microsoft Entra ID. Detalhes: $($_.Exception.Message)"
+    }
+}
+
+Export-ModuleMember -Function Test-EntraConfiguration, Test-EntraUserProvisioning, Test-EntraUserExists, New-EntraUserProvision, Test-EntraTenantConnection
