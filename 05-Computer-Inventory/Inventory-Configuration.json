@@ -1,0 +1,32 @@
+{
+    "SimulationMode": false,
+
+    "Inventory": {
+        "ComputerSystem": true,
+        "OperatingSystem": true,
+        "Processor": true,
+        "Memory": true,
+        "Disk": true,
+        "Network": true,
+        "BitLocker": true
+    },
+
+    "Output": {
+        "Formats": [
+            "JSON",
+            "CSV"
+        ],
+        "Directory": "Reports"
+    },
+
+    "Disk": {
+        "IncludeFixedDrives": true,
+        "IncludeRemovableDrives": false
+    },
+
+    "Network": {
+        "IncludeIPv4": true,
+        "IncludeIPv6": false,
+        "IncludeMACAddress": true
+    }
+}
