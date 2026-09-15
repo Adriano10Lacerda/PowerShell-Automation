@@ -1,0 +1,53 @@
+{
+    "SimulationMode": true,
+
+    "ActiveDirectory": {
+        "DomainController": "",
+        "TargetOU": ""
+    },
+
+    "Group": {
+        "DefaultScope": "Global",
+        "DefaultCategory": "Security",
+        "RequireDescription": true
+    },
+
+    "Operations": {
+        "CreateGroup": true,
+        "AddMember": true,
+        "RemoveMember": true,
+        "ListMembers": true
+    },
+
+    "Simulation": {
+        "ExistingGroups": [
+            {
+                "Name": "TI-Suporte",
+                "Description": "Grupo de suporte de TI",
+                "Members": [
+                    "maria.santos"
+                ]
+            },
+            {
+                "Name": "TI-Infraestrutura",
+                "Description": "Grupo da equipe de infraestrutura",
+                "Members": [
+                    "carlos.oliveira"
+                ]
+            },
+            {
+                "Name": "Administradores",
+                "Description": "Grupo de administradores",
+                "Members": [
+                    "joao.silva"
+                ]
+            }
+        ],
+
+        "ExistingUsers": [
+            "joao.silva",
+            "maria.santos",
+            "carlos.oliveira"
+        ]
+    }
+}
