@@ -372,13 +372,38 @@ function Test-ADConnectivity {
 function Test-ADUserExists {
     param (
         [Parameter(Mandatory)]
-        [string]$SamAccountName
+        [string]$SamAccountName,
+
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
     )
+
+    if ([string]::IsNullOrWhiteSpace($SamAccountName)) {
+        throw "O SamAccountName é obrigatório para realizar a consulta."
+    }
+
+    if ($Configuration.SimulationMode -eq $true) {
+
+        if ($null -eq $Configuration.Simulation) {
+            return $false
+        }
+
+        if ($Configuration.Simulation.ExistingSamAccountNames -contains $SamAccountName) {
+            return $true
+        }
+
+        return $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Configuration.DomainController)) {
+        throw "O DomainController deve ser configurado para consultar o Active Directory."
+    }
 
     try {
 
         $User = Get-ADUser `
             -Identity $SamAccountName `
+            -Server $Configuration.DomainController `
             -ErrorAction Stop
 
         if ($null -ne $User) {
@@ -393,7 +418,7 @@ function Test-ADUserExists {
     }
     catch {
 
-        throw "Não foi possível consultar o Active Directory para verificar o usuário '$SamAccountName'. Detalhes: $($_.Exception.Message)"
+        throw "Não foi possível consultar o Active Directory para verificar o usuário '$SamAccountName' através do Domain Controller '$($Configuration.DomainController)'. Detalhes: $($_.Exception.Message)"
     }
 }
 
@@ -839,7 +864,10 @@ function New-ADUserProvision {
     # Verificar duplicidade
     # ========================================
 
-    if (Test-ADUserExists -SamAccountName $User.SamAccountName) {
+    if (Test-ADUserExists `
+    -SamAccountName $User.SamAccountName `
+    -Configuration $Configuration
+        ) {
 
         throw "O usuário '$($User.SamAccountName)' já existe no Active Directory."
     }
