@@ -1,0 +1,48 @@
+{
+    "SimulationMode": true,
+
+    "ActiveDirectory": {
+        "DomainController": "",
+        "TargetDomain": ""
+    },
+
+    "GPO": {
+        "DefaultDescription": "GPO criada pelo PowerShell Automation",
+        "RequireDescription": true
+    },
+
+    "Operations": {
+        "CheckGPO": true,
+        "ListGPOs": true,
+        "CreateGPO": true,
+        "CheckLinks": true,
+        "ListLinks": true
+    },
+
+    "Simulation": {
+        "ExistingGPOs": [
+            {
+                "Name": "GPO-Desktop-Security",
+                "DisplayName": "GPO Desktop Security",
+                "Description": "Políticas de segurança para computadores",
+                "Links": [
+                    "OU=Computers,DC=example,DC=local"
+                ]
+            },
+            {
+                "Name": "GPO-Office-Standard",
+                "DisplayName": "GPO Office Standard",
+                "Description": "Configurações padrão do ambiente corporativo",
+                "Links": [
+                    "OU=Users,DC=example,DC=local"
+                ]
+            },
+            {
+                "Name": "GPO-Windows-Update",
+                "DisplayName": "GPO Windows Update",
+                "Description": "Políticas relacionadas ao Windows Update",
+                "Links": []
+            }
+        ]
+    }
+}
