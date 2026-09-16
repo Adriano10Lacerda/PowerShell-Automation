@@ -1,0 +1,69 @@
+{
+    "SimulationMode": true,
+
+    "Reporting": {
+        "IncludeSummary": true,
+        "IncludeDetails": true,
+        "IncludeTimestamp": true
+    },
+
+    "Output": {
+        "Directory": "Reports",
+        "Formats": [
+            "JSON",
+            "CSV"
+        ]
+    },
+
+    "Sources": {
+        "ComputerInventory": {
+            "Enabled": true,
+            "Directory": "../05-Computer-Inventory/Reports",
+            "FilePattern": "ComputerInventory_*",
+            "Formats": [
+                ".json",
+                ".csv"
+            ]
+        },
+
+        "ADUsers": {
+            "Enabled": false,
+            "Directory": "../03-AD-User-Provisioning/Reports",
+            "FilePattern": "ADUser_*",
+            "Formats": [
+                ".json",
+                ".csv"
+            ]
+        },
+
+        "ADGroups": {
+            "Enabled": false,
+            "Directory": "../06-AD-Group-Management/Reports",
+            "FilePattern": "ADGroup_*",
+            "Formats": [
+                ".json",
+                ".csv"
+            ]
+        },
+
+        "GPOs": {
+            "Enabled": false,
+            "Directory": "../07-GPO-Management/Reports",
+            "FilePattern": "GPO_*",
+            "Formats": [
+                ".json",
+                ".csv"
+            ]
+        },
+
+        "EntraUsers": {
+            "Enabled": false,
+            "Directory": "../04-Entra-ID-User-Provisioning/Reports",
+            "FilePattern": "EntraUser_*",
+            "Formats": [
+                ".json",
+                ".csv"
+            ]
+        }
+    }
+}
