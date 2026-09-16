@@ -48,6 +48,8 @@ catch
 function Get-SecureRandomIndex
 {
     param (
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, [int]::MaxValue)]
         [int]$Maximum
     )
 
@@ -56,9 +58,20 @@ function Get-SecureRandomIndex
     try
     {
         $Bytes = New-Object byte[] 4
-        $Random.GetBytes($Bytes)
 
-        $Numero = [BitConverter]::ToUInt32($Bytes, 0)
+        # Calcula o maior valor que pode ser utilizado
+        # sem introduzir modulo bias.
+        $Limit = [uint64]::MaxValue - (
+            ([uint64]::MaxValue + 1) % [uint64]$Maximum
+        )
+
+        do
+        {
+            $Random.GetBytes($Bytes)
+
+            $Numero = [uint64][BitConverter]::ToUInt32($Bytes, 0)
+        }
+        while ($Numero -gt $Limit)
 
         return [int]($Numero % $Maximum)
     }
