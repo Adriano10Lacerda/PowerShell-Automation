@@ -52,6 +52,44 @@ function Test-EntraConfiguration {
     return $true
 }
 
+function ConvertTo-EntraIdentifier {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Text
+    )
+
+    $NormalizedText = $Text.Normalize(
+        [System.Text.NormalizationForm]::FormD
+    )
+
+    $StringBuilder = New-Object System.Text.StringBuilder
+
+    foreach ($Character in $NormalizedText.ToCharArray()) {
+
+        if ([Globalization.CharUnicodeInfo]::GetUnicodeCategory($Character) -ne
+            [Globalization.UnicodeCategory]::NonSpacingMark) {
+
+            [void]$StringBuilder.Append($Character)
+        }
+    }
+
+    $Result = $StringBuilder.ToString()
+
+    # Substitui espaços por hífens
+    $Result = $Result -replace '\s+', '-'
+
+    # Remove caracteres que não sejam letras, números ou hífen
+    $Result = $Result -replace '[^a-zA-Z0-9-]', ''
+
+    # Remove hífens duplicados
+    $Result = $Result -replace '-+', '-'
+
+    # Remove hífens no início e no final
+    $Result = $Result.Trim('-')
+
+    return $Result.ToLower()
+}
 function Test-EntraUserProvisioning {
 
     param (
@@ -194,7 +232,7 @@ function New-EntraUserProvision {
     )
 
     # Validação dos dados
-    Test-EntraUserProvisioning -User $User -Configuration $Configuration
+    $null = Test-EntraUserProvisioning -User $User -Configuration $Configuration
 
     # Verificação de usuário existente
     if (Test-EntraUserExists `
@@ -213,8 +251,6 @@ function New-EntraUserProvision {
             UserPrincipalName   = $User.UserPrincipalName
             DisplayName         = $User.DisplayName
             MailNickname        = $User.MailNickname
-            JobTitle            = $User.JobTitle
-            Department          = $User.Department
             AccountEnabled      = $User.AccountEnabled
             Message             = "Usuário preparado para criação no Entra ID. Nenhuma alteração real foi realizada."
         }
@@ -264,4 +300,4 @@ function Test-EntraTenantConnection {
     }
 }
 
-Export-ModuleMember -Function Test-EntraConfiguration, Test-EntraUserProvisioning, Test-EntraUserExists, New-EntraUserProvision, Test-EntraTenantConnection
+Export-ModuleMember -Function Test-EntraConfiguration, Test-EntraUserProvisioning, Test-EntraUserExists, New-EntraUserProvision, Test-EntraTenantConnection, ConvertTo-EntraIdentifier
