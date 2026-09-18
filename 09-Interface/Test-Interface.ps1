@@ -38,6 +38,10 @@ Write-Host "==============================================" -ForegroundColor Cya
 Write-Host ""
 
 
+# ==========================================================
+# Interface
+# ==========================================================
+
 Invoke-Test "Interface-Functions.psm1 existe" {
 
     if (-not (Test-Path $InterfaceFunctionsPath)) {
@@ -52,10 +56,22 @@ Invoke-Test "Interface-Functions.psm1 importa corretamente" {
 }
 
 
+# ==========================================================
+# Funções da Interface
+# ==========================================================
+
 Invoke-Test "Função Start-PasswordGenerator existe" {
 
     if (-not (Get-Command Start-PasswordGenerator -ErrorAction SilentlyContinue)) {
         throw "Start-PasswordGenerator não encontrada."
+    }
+}
+
+
+Invoke-Test "Função Start-Configuration existe" {
+
+    if (-not (Get-Command Start-Configuration -ErrorAction SilentlyContinue)) {
+        throw "Start-Configuration não encontrada."
     }
 }
 
@@ -108,6 +124,10 @@ Invoke-Test "Função Start-Reporting existe" {
 }
 
 
+# ==========================================================
+# Módulo 01
+# ==========================================================
+
 Invoke-Test "Módulo 01 existe" {
 
     $Path = Join-Path $PSScriptRoot "..\01-Password-Generator\Generate-Password.ps1"
@@ -117,6 +137,34 @@ Invoke-Test "Módulo 01 existe" {
     }
 }
 
+
+# ==========================================================
+# Módulo 02
+# ==========================================================
+
+Invoke-Test "Módulo 02 existe" {
+
+    $Path = Join-Path $PSScriptRoot "..\02-Configuration\Configuration.psm1"
+
+    if (-not (Test-Path $Path)) {
+        throw "Configuration.psm1 não encontrado."
+    }
+}
+
+
+Invoke-Test "Validate-Configuration.ps1 existe" {
+
+    $Path = Join-Path $PSScriptRoot "..\02-Configuration\Validate-Configuration.ps1"
+
+    if (-not (Test-Path $Path)) {
+        throw "Validate-Configuration.ps1 não encontrado."
+    }
+}
+
+
+# ==========================================================
+# Módulo 03
+# ==========================================================
 
 Invoke-Test "Módulo 03 existe" {
 
@@ -128,6 +176,10 @@ Invoke-Test "Módulo 03 existe" {
 }
 
 
+# ==========================================================
+# Módulo 04
+# ==========================================================
+
 Invoke-Test "Módulo 04 existe" {
 
     $Path = Join-Path $PSScriptRoot "..\04-Entra-ID-User-Provisioning\Provision-EntraUser.ps1"
@@ -137,6 +189,10 @@ Invoke-Test "Módulo 04 existe" {
     }
 }
 
+
+# ==========================================================
+# Módulo 05
+# ==========================================================
 
 Invoke-Test "Módulo 05 existe" {
 
@@ -148,6 +204,10 @@ Invoke-Test "Módulo 05 existe" {
 }
 
 
+# ==========================================================
+# Módulo 06
+# ==========================================================
+
 Invoke-Test "Módulo 06 existe" {
 
     $Path = Join-Path $PSScriptRoot "..\06-AD-Group-Management\AD-Group-Management.ps1"
@@ -157,6 +217,10 @@ Invoke-Test "Módulo 06 existe" {
     }
 }
 
+
+# ==========================================================
+# Módulo 07
+# ==========================================================
 
 Invoke-Test "Módulo 07 existe" {
 
@@ -168,6 +232,10 @@ Invoke-Test "Módulo 07 existe" {
 }
 
 
+# ==========================================================
+# Módulo 08
+# ==========================================================
+
 Invoke-Test "Módulo 08 existe" {
 
     $Path = Join-Path $PSScriptRoot "..\08-Reporting\Reporting.ps1"
@@ -177,6 +245,10 @@ Invoke-Test "Módulo 08 existe" {
     }
 }
 
+
+# ==========================================================
+# Resultado
+# ==========================================================
 
 Write-Host ""
 Write-Host "==============================================" -ForegroundColor Cyan

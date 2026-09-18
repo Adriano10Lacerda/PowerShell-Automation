@@ -115,9 +115,10 @@ do {
 
             "8" {
                 Write-Host ""
-                Write-Host "Configuration selected." -ForegroundColor Green
+                Write-Host "Starting Configuration Validator..." -ForegroundColor Green
                 Write-Host ""
-                Write-Host "Configuration management will be integrated in a future step." -ForegroundColor Yellow
+
+                Start-Configuration
 
                 Pause
             }

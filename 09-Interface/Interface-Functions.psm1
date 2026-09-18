@@ -10,6 +10,18 @@ function Start-PasswordGenerator {
 }
 
 
+function Start-Configuration {
+
+    $ScriptPath = Join-Path $PSScriptRoot "..\02-Configuration\Validate-Configuration.ps1"
+
+    if (-not (Test-Path $ScriptPath)) {
+        throw "Configuration Validator não encontrado: $ScriptPath"
+    }
+
+    & $ScriptPath
+}
+
+
 function Start-ADUserProvisioning {
 
     $ScriptPath = Join-Path $PSScriptRoot "..\03-AD-User-Provisioning\Provision-ADUser.ps1"
@@ -84,6 +96,7 @@ function Start-Reporting {
 
 Export-ModuleMember -Function `
     Start-PasswordGenerator, `
+    Start-Configuration, `
     Start-ADUserProvisioning, `
     Start-EntraUserProvisioning, `
     Start-ComputerInventory, `
