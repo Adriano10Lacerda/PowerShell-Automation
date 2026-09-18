@@ -1,6 +1,6 @@
 {
-    "TenantId": "",
-    "Domain": "",
+    "TenantId": "00000000-0000-0000-0000-000000000000",
+    "Domain": "example.onmicrosoft.com",
     "SimulationMode": true,
 
     "UserPrincipalName": {

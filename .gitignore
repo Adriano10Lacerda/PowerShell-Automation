@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 05-Computer-Inventory/Reports/
 08-Reporting/Reports/
+04-Entra-ID-User-Provisioning/Entra-Configuration.json

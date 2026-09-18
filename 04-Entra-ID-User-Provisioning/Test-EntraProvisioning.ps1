@@ -3,16 +3,44 @@
 # Testes do módulo Entra ID User Provisioning
 # ============================================
 
+$ErrorActionPreference = "Stop"
+
 $ModulePath = Join-Path $PSScriptRoot "Entra-Functions.psm1"
 $ConfigPath = Join-Path $PSScriptRoot "Entra-Configuration.json"
 
-# Carregar módulo
+# ============================================
+# CARREGAR MÓDULO
+# ============================================
+
 Import-Module $ModulePath -Force
 
-# Carregar configuração
-$Config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+# ============================================
+# CARREGAR CONFIGURAÇÃO
+# ============================================
 
-# Contadores
+$Config = Get-Content $ConfigPath -Raw |
+    ConvertFrom-Json
+
+# ============================================
+# CONFIGURAÇÃO DE TESTE
+# ============================================
+# Os testes nunca devem depender do modo real
+# configurado no ambiente do usuário.
+
+$TestConfig = $Config | ConvertTo-Json -Depth 20 |
+    ConvertFrom-Json
+
+$TestConfig.SimulationMode = $true
+
+$TestConfig.Simulation.ExistingUserPrincipalNames = @(
+    "maria.silva@example.onmicrosoft.com",
+    "joao.santos@example.onmicrosoft.com"
+)
+
+# ============================================
+# CONTADORES
+# ============================================
+
 $TotalTests = 0
 $PassedTests = 0
 $FailedTests = 0
@@ -25,10 +53,11 @@ Write-Host ""
 
 Write-Host "Módulo carregado: OK" -ForegroundColor Green
 Write-Host "Configuração carregada: OK" -ForegroundColor Green
+Write-Host "Ambiente de teste: SIMULAÇÃO" -ForegroundColor Yellow
 Write-Host ""
 
 # ============================================
-# TESTE 1 - Validação da configuração
+# TESTE 1 - VALIDAÇÃO DA CONFIGURAÇÃO
 # ============================================
 
 Write-Host "Teste 1 - Validação da configuração" -ForegroundColor Yellow
@@ -37,7 +66,9 @@ $TotalTests++
 
 try {
 
-    Test-EntraConfiguration -Configuration $Config | Out-Null
+    Test-EntraConfiguration `
+        -Configuration $TestConfig |
+        Out-Null
 
     $PassedTests++
 
@@ -54,7 +85,7 @@ catch {
 Write-Host ""
 
 # ============================================
-# TESTE 2 - Usuário válido
+# TESTE 2 - USUÁRIO VÁLIDO
 # ============================================
 
 Write-Host "Teste 2 - Validação de usuário válido" -ForegroundColor Yellow
@@ -62,21 +93,22 @@ Write-Host "Teste 2 - Validação de usuário válido" -ForegroundColor Yellow
 $TotalTests++
 
 $UserValid = [PSCustomObject]@{
-    FirstName           = "Carlos"
-    LastName            = "Oliveira"
-    DisplayName         = "Carlos Oliveira"
-    UserPrincipalName   = "carlos.oliveira@example.onmicrosoft.com"
-    MailNickname        = "carlos.oliveira"
-    JobTitle            = "Analista de Infraestrutura"
-    Department          = "Tecnologia"
-    AccountEnabled      = $true
+    FirstName         = "Carlos"
+    LastName          = "Oliveira"
+    DisplayName       = "Carlos Oliveira"
+    UserPrincipalName = "carlos.oliveira@example.onmicrosoft.com"
+    MailNickname      = "carlos.oliveira"
+    JobTitle          = "Analista de Infraestrutura"
+    Department        = "Tecnologia"
+    AccountEnabled    = $true
 }
 
 try {
 
     Test-EntraUserProvisioning `
         -User $UserValid `
-        -Configuration $Config | Out-Null
+        -Configuration $TestConfig |
+        Out-Null
 
     $PassedTests++
 
@@ -86,14 +118,14 @@ catch {
 
     $FailedTests++
 
-    Write-Host "FALHOU - Usuário inválido." -ForegroundColor Red
+    Write-Host "FALHOU - Usuário válido foi rejeitado." -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
 }
 
 Write-Host ""
 
 # ============================================
-# TESTE 3 - Usuário inválido
+# TESTE 3 - USUÁRIO INVÁLIDO
 # ============================================
 
 Write-Host "Teste 3 - Validação de usuário inválido" -ForegroundColor Yellow
@@ -101,21 +133,22 @@ Write-Host "Teste 3 - Validação de usuário inválido" -ForegroundColor Yellow
 $TotalTests++
 
 $UserInvalid = [PSCustomObject]@{
-    FirstName           = "A"
-    LastName            = "S"
-    DisplayName         = "A S"
-    UserPrincipalName   = "usuario-invalido"
-    MailNickname        = "usuario-invalido"
-    JobTitle            = "Analista"
-    Department          = "Tecnologia"
-    AccountEnabled      = $true
+    FirstName         = "A"
+    LastName          = "S"
+    DisplayName       = "A S"
+    UserPrincipalName = "usuario-invalido"
+    MailNickname      = "usuario-invalido"
+    JobTitle          = "Analista"
+    Department        = "Tecnologia"
+    AccountEnabled    = $true
 }
 
 try {
 
     Test-EntraUserProvisioning `
         -User $UserInvalid `
-        -Configuration $Config | Out-Null
+        -Configuration $TestConfig |
+        Out-Null
 
     Write-Host "FALHOU - O usuário inválido foi aceito." -ForegroundColor Red
 
@@ -131,7 +164,7 @@ catch {
 Write-Host ""
 
 # ============================================
-# TESTE 4 - Usuário duplicado
+# TESTE 4 - USUÁRIO DUPLICADO
 # ============================================
 
 Write-Host "Teste 4 - Detecção de usuário duplicado" -ForegroundColor Yellow
@@ -139,37 +172,47 @@ Write-Host "Teste 4 - Detecção de usuário duplicado" -ForegroundColor Yellow
 $TotalTests++
 
 $UserDuplicate = [PSCustomObject]@{
-    FirstName           = "Maria"
-    LastName            = "Silva"
-    DisplayName         = "Maria Silva"
-    UserPrincipalName   = "maria.silva@example.onmicrosoft.com"
-    MailNickname        = "maria.silva"
-    JobTitle            = "Analista"
-    Department          = "Tecnologia"
-    AccountEnabled      = $true
+    FirstName         = "Maria"
+    LastName          = "Silva"
+    DisplayName       = "Maria Silva"
+    UserPrincipalName = "maria.silva@example.onmicrosoft.com"
+    MailNickname      = "maria.silva"
+    JobTitle          = "Analista"
+    Department        = "Tecnologia"
+    AccountEnabled    = $true
 }
 
 try {
 
-    New-EntraUserProvision `
-        -User $UserDuplicate `
-        -Configuration $Config | Out-Null
+    $Exists = Test-EntraUserExists `
+        -UserPrincipalName $UserDuplicate.UserPrincipalName `
+        -Configuration $TestConfig
 
-    Write-Host "FALHOU - O usuário duplicado foi aceito." -ForegroundColor Red
+    if ($Exists -eq $true) {
 
-    $FailedTests++
+        $PassedTests++
+
+        Write-Host "PASSOU - Usuário duplicado foi identificado corretamente." -ForegroundColor Green
+    }
+    else {
+
+        $FailedTests++
+
+        Write-Host "FALHOU - Usuário duplicado não foi identificado." -ForegroundColor Red
+    }
 }
 catch {
 
-    $PassedTests++
+    $FailedTests++
 
-    Write-Host "PASSOU - Usuário duplicado foi rejeitado corretamente." -ForegroundColor Green
+    Write-Host "FALHOU - Erro durante a detecção de duplicidade." -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
 }
 
 Write-Host ""
 
 # ============================================
-# TESTE 5 - Provisionamento simulado
+# TESTE 5 - PROVISIONAMENTO SIMULADO
 # ============================================
 
 Write-Host "Teste 5 - Provisionamento simulado" -ForegroundColor Yellow
@@ -177,23 +220,28 @@ Write-Host "Teste 5 - Provisionamento simulado" -ForegroundColor Yellow
 $TotalTests++
 
 $UserNew = [PSCustomObject]@{
-    FirstName           = "Carlos"
-    LastName            = "Oliveira"
-    DisplayName         = "Carlos Oliveira"
-    UserPrincipalName   = "carlos.oliveira@example.onmicrosoft.com"
-    MailNickname        = "carlos.oliveira"
-    JobTitle            = "Analista de Infraestrutura"
-    Department          = "Tecnologia"
-    AccountEnabled      = $true
+    FirstName         = "Carlos"
+    LastName          = "Oliveira"
+    DisplayName       = "Carlos Oliveira"
+    UserPrincipalName = "carlos.oliveira2@example.onmicrosoft.com"
+    MailNickname      = "carlos.oliveira2"
+    JobTitle          = "Analista de Infraestrutura"
+    Department        = "Tecnologia"
+    AccountEnabled    = $true
 }
 
 try {
 
     $Result = New-EntraUserProvision `
         -User $UserNew `
-        -Configuration $Config
+        -Configuration $TestConfig
 
-    if ($Result.Success -eq $true -and $Result.Simulation -eq $true) {
+    if (
+        $Result.Success -eq $true -and
+        $Result.Simulation -eq $true -and
+        $Result.PostValidation -eq $false -and
+        $Result.UserPrincipalName -eq $UserNew.UserPrincipalName
+    ) {
 
         $PassedTests++
 
@@ -219,7 +267,7 @@ catch {
 Write-Host ""
 
 # ============================================
-# TESTE 6 - Usuário não existente
+# TESTE 6 - USUÁRIO NÃO EXISTENTE
 # ============================================
 
 Write-Host "Teste 6 - Usuário não existente" -ForegroundColor Yellow
@@ -232,7 +280,7 @@ try {
 
     $Exists = Test-EntraUserExists `
         -UserPrincipalName $UserNotExists `
-        -Configuration $Config
+        -Configuration $TestConfig
 
     if ($Exists -eq $false) {
 
@@ -253,6 +301,70 @@ catch {
 
     Write-Host "FALHOU - Erro ao verificar usuário." -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+}
+
+Write-Host ""
+
+# ============================================
+# TESTE 7 - CONVERSÃO DE IDENTIFICADOR
+# ============================================
+
+Write-Host "Teste 7 - Conversão de identificador" -ForegroundColor Yellow
+
+$TotalTests++
+
+try {
+
+    $Result = ConvertTo-EntraIdentifier `
+        -Text "João da Silva"
+
+    if ($Result -eq "joao-da-silva") {
+
+        $PassedTests++
+
+        Write-Host "PASSOU - Identificador normalizado corretamente." -ForegroundColor Green
+        Write-Host "Resultado: $Result" -ForegroundColor Green
+    }
+    else {
+
+        $FailedTests++
+
+        Write-Host "FALHOU - Resultado inesperado: $Result" -ForegroundColor Red
+    }
+}
+catch {
+
+    $FailedTests++
+
+    Write-Host "FALHOU - Erro na conversão do identificador." -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+}
+
+Write-Host ""
+
+# ============================================
+# TESTE 8 - PÓS-VALIDAÇÃO SEM GRAPH
+# ============================================
+
+Write-Host "Teste 8 - Validação da função de pós-provisionamento" -ForegroundColor Yellow
+
+$TotalTests++
+
+$PostValidationCommand = Get-Command `
+    Test-EntraUserPostProvisioning `
+    -ErrorAction SilentlyContinue
+
+if ($null -ne $PostValidationCommand) {
+
+    $PassedTests++
+
+    Write-Host "PASSOU - Função de pós-validação disponível." -ForegroundColor Green
+}
+else {
+
+    $FailedTests++
+
+    Write-Host "FALHOU - Função de pós-validação não encontrada." -ForegroundColor Red
 }
 
 Write-Host ""
