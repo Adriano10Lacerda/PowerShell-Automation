@@ -6,7 +6,7 @@
 $ErrorActionPreference = "Stop"
 
 $ModulePath = Join-Path $PSScriptRoot "Entra-Functions.psm1"
-$ConfigPath = Join-Path $PSScriptRoot "Entra-Configuration.json"
+$ConfigPath = Join-Path $PSScriptRoot "Entra-Configuration.example.json"
 
 # ============================================
 # CARREGAR MÓDULO
