@@ -1,328 +1,389 @@
-# ⚡ PowerShell Automation
+# PowerShell Automation Toolkit
 
-Enterprise PowerShell automation toolkit focused on Windows administration, Microsoft technologies, infrastructure operations, automation, validation, security, and reporting.
+## Enterprise IT Automation
 
-The project is designed with a modular and configurable architecture, allowing automation routines to be adapted to different environments without hard-coding customer-specific information.
+A modular PowerShell automation toolkit designed to automate common IT infrastructure and administration tasks across on-premises Active Directory, Microsoft Entra ID, endpoint inventory, Group Policy, reporting, and configuration management.
 
----
-
-## 🎯 Project Overview
-
-The **PowerShell Automation** project was created to develop practical automation solutions for IT infrastructure and Windows environments.
-
-The toolkit brings together multiple automation modules covering areas such as:
-
-- Windows administration
-- Active Directory
-- Microsoft Entra ID
-- Computer inventory
-- Active Directory group management
-- Group Policy Objects (GPO)
-- Operational reporting
-- Password generation
-- Configuration and validation
-- Automated testing
-
-The project also uses **Simulation Mode** in modules where operational changes could affect real environments, allowing functionality to be tested safely before execution against production infrastructure.
+The project is structured to be reusable across different environments through external configuration files, Simulation Mode, validation, error handling, and automated tests.
 
 ---
 
-## 🏗️ Architecture
+## Project Overview
 
-The project follows a modular architecture.
+The goal of this project is to transform repetitive IT administration activities into controlled, repeatable, and auditable PowerShell workflows.
 
-Each module has its own:
+The toolkit is organized into independent modules and a central interface:
 
-- PowerShell scripts
-- PowerShell functions
-- Configuration file
-- Automated tests
-- Documentation
-- Reports when applicable
+- **01 - Password Generator**
+- **02 - Configuration**
+- **03 - AD User Provisioning**
+- **04 - Entra ID User Provisioning**
+- **05 - Computer Inventory**
+- **06 - AD Group Management**
+- **07 - GPO Management**
+- **08 - Reporting**
+- **09 - Interface & Toolkit Launcher**
 
-This structure makes the project easier to:
-
-- Maintain
-- Test
-- Extend
-- Troubleshoot
-- Reuse
-- Adapt to different environments
+The modules can be used independently or launched through the central interface.
 
 ---
 
-## 📦 Modules
+## Architecture
+
+```text
+                    POWERSHELL AUTOMATION TOOLKIT
+                                │
+                                ▼
+                    09 - INTERFACE & LAUNCHER
+                                │
+       ┌────────┬────────┬──────┼──────┬────────┬────────┐
+       ▼        ▼        ▼      ▼      ▼        ▼        ▼
+      01       02       03     04     05       06       07
+   Password  Config     AD    Entra  Inventory Groups   GPO
+   Generator          Users    ID
+                                │
+                                ▼
+                            08 - Reporting
+```
+
+---
+
+## Modules
 
 ### 01 - Password Generator
 
-Secure password generation using configurable parameters.
+Generates secure random passwords using configurable rules.
 
-Features include:
+Features:
 
 - Configurable password length
-- Prefix and date components
-- Character complexity
-- Special characters
-- Input validation
 - Cryptographically secure random generation
-- Rejection sampling to avoid modulo bias
+- Configurable special characters
+- Validation of password requirements
 
 ---
 
 ### 02 - Configuration
 
-Centralized configuration and validation used by the automation environment.
+Central configuration validation for the toolkit.
 
-Features include:
+Features:
 
 - Configuration file validation
-- Numeric parameter validation
-- Minimum value validation
+- Prefix validation
+- Password character quantity validation
 - Date format validation
-- Character configuration validation
-- Reusable configuration structure
+- Special character validation
+- Separation between public example configuration and local configuration
 
 ---
 
 ### 03 - AD User Provisioning
 
-Automation for user provisioning in on-premises Active Directory.
+Automates user provisioning in on-premises Active Directory.
 
-Features include:
+Features:
 
 - User input validation
-- Automatic `SamAccountName` generation
+- SAM account name generation
 - Accent removal
-- Duplicate account handling
+- Duplicate detection
+- Configurable user types
+- Employee, contractor, and intern formats
+- UPN generation
 - Long-name handling
-- Employee, Contractor and Intern user types
-- User Principal Name generation
 - Simulation Mode
 - Active Directory connectivity validation
-- Automated testing
-
-The module is designed to support both simulated execution and authorized real Active Directory environments.
+- Controlled user creation
 
 ---
 
 ### 04 - Entra ID User Provisioning
 
-Automation structure for Microsoft Entra ID user provisioning.
+Automates user provisioning in Microsoft Entra ID using Microsoft Graph PowerShell.
 
-Features include:
+Features:
 
-- Tenant configuration
-- User Principal Name configuration
-- Duplicate user validation
+- Microsoft Graph authentication
+- Tenant validation
+- User input validation
+- UPN generation
+- Duplicate detection
 - Simulation Mode
-- Microsoft Graph integration
-- Tenant connectivity validation
-- Automated testing
-
-Real-environment operations require an appropriate Microsoft Entra ID tenant and authorized Microsoft Graph permissions.
+- Secure password input
+- Temporary handling of password data
+- Real user provisioning
+- Post-provisioning validation
+- Least-privilege oriented permissions
 
 ---
 
 ### 05 - Computer Inventory
 
-Computer hardware and operating system inventory using PowerShell/CIM.
+Collects hardware, operating system, processor, memory, disk, network, and BitLocker information.
 
-Collected information can include:
+Features:
 
-- Computer system
-- Operating system
-- Processor
-- Memory
-- Disk
-- Network
-- BitLocker
-
-Reports can be exported in:
-
-- JSON
-- CSV
-
-The module also handles situations where specific information, such as BitLocker data, is unavailable without interrupting the entire inventory process.
+- Computer system inventory
+- Operating system information
+- Processor information
+- RAM information
+- Disk information
+- Network information
+- BitLocker status
+- Configurable collection categories
+- JSON export
+- CSV export
+- Error handling for unavailable components
 
 ---
 
 ### 06 - AD Group Management
 
-Automation for Active Directory group administration.
+Automates common Active Directory group management tasks.
 
-Supported operations include:
+Features:
 
-- Create groups
-- Check group existence
-- Check group membership
+- Group existence validation
+- Group creation
 - Add members
 - Remove members
-- List group members
+- List members
+- Group configuration
 - Simulation Mode
 - Active Directory connectivity validation
-
-The module uses explicit configuration for domain controllers and supports controlled execution in real environments.
+- Configurable operation controls
 
 ---
 
 ### 07 - GPO Management
 
-Automation structure for Group Policy Object management.
+Provides controlled automation for Group Policy administration.
 
-Supported operations include:
+Features:
 
-- List GPOs
-- Check GPO existence
-- Create GPOs
-- Retrieve GPO links
+- GPO existence validation
+- GPO listing
+- GPO creation
+- GPO link inspection
 - Simulation Mode
-- Configuration validation
-- Connectivity validation
-
-Operational permissions are controlled through configuration to prevent unauthorized actions.
+- Active Directory / Group Policy connectivity validation
+- Configurable operation controls
 
 ---
 
 ### 08 - Reporting
 
-Centralized reporting module designed to consume information generated by other automation modules.
+Aggregates information generated by the other modules into centralized reports.
 
-Features include:
+Features:
 
-- Automatic source discovery
-- JSON and CSV source support
-- Configurable source directories
-- Configurable file patterns
-- Data consolidation
-- Reporting summaries
-- Dataset generation
-- Report export
-- Automated testing
-
-The reporting architecture is designed to allow new data sources to be added without changing the core reporting logic.
+- Configurable data sources
+- JSON and CSV input
+- Source filtering
+- Summary generation
+- Detailed dataset generation
+- JSON report export
+- CSV summary export
+- Error handling per source file
+- Relative and absolute path support
 
 ---
 
-## 🔐 Security & Validation
+### 09 - Interface & Toolkit Launcher
 
-Security and controlled execution are important aspects of the project.
+Central command-line interface for accessing the toolkit modules.
 
-The automation modules use several mechanisms to reduce operational risk:
+Features:
 
-- Input validation
+- Centralized menu
+- Access to modules 01–08
+- Configuration validation access
+- Module path validation
+- Centralized error handling
+- Interactive execution flow
+
+Example:
+
+```text
+==================================================
+          POWERSHELL AUTOMATION TOOLKIT
+             Enterprise IT Automation
+==================================================
+
+  1 - Password Generator
+  2 - AD User Provisioning
+  3 - Entra ID User Provisioning
+  4 - Computer Inventory
+  5 - AD Group Management
+  6 - GPO Management
+  7 - Reporting
+  8 - Configuration
+
+  0 - Exit
+```
+
+---
+
+## Security & Validation
+
+Security and controlled execution are core design principles of the project.
+
+The toolkit includes:
+
+- Simulation Mode for modules that can perform real environment changes
 - Configuration validation
-- Explicit domain controller configuration
-- Simulation Mode
-- Controlled operation flags
-- Validation before execution
-- Secure random generation for passwords
-- No hard-coded credentials
-- No hard-coded customer-specific credentials or tokens
-- Explicit parameters for Active Directory operations
-- Separation between configuration, functions and execution logic
+- Input validation
+- Duplicate detection
+- Explicit Active Directory server configuration
+- No hard-coded production credentials
+- No hard-coded tenant credentials
+- Local configuration files excluded from the public repository
+- Example configuration files for public use
+- Secure password input for Entra ID provisioning
+- Temporary handling and cleanup of password data
+- Controlled error handling
 
-The project follows the principle of avoiding unnecessary changes to production environments during development and testing.
+The public repository is designed to contain examples and source code without exposing environment-specific credentials, tenant identifiers, or local configuration data.
 
 ---
 
-## 🧪 Automated Testing
+## Automated Testing
 
-Each major module contains automated tests designed to validate its functionality.
+The project contains automated tests for the main modules.
 
-Current test coverage includes scenarios such as:
-
-- Valid configurations
-- Invalid configurations
-- Invalid user input
-- Duplicate objects
-- Long names
-- Unsupported values
-- Simulation behavior
-- Connectivity behavior
-- Operational restrictions
-- Report generation
-
-Current documented automated tests:
+Current documented test coverage:
 
 | Module | Tests |
 |---|---:|
 | 03 - AD User Provisioning | 19 |
-| 04 - Entra ID User Provisioning | 6 |
+| 04 - Entra ID User Provisioning | 8 |
 | 05 - Computer Inventory | 13 |
 | 06 - AD Group Management | 19 |
 | 07 - GPO Management | 21 |
 | 08 - Reporting | 18 |
+| **Documented total** | **98** |
 
-**Total documented automated tests: 96**
+Module 09 also contains interface validation tests.
 
-All documented tests above were passing during development validation.
+The tests validate configuration, module loading, input validation, simulation workflows, error handling, and expected outputs according to each module.
 
 ---
 
-## 🖥️ Simulation Mode
+## Simulation Mode
 
-Several modules support **Simulation Mode**.
+Simulation Mode allows administrative workflows to be demonstrated and tested without making real changes to the target environment.
 
-Simulation Mode allows automation logic to be executed without making changes to the real infrastructure.
+Example:
 
-This is particularly useful for:
+```text
+Simulation Mode: ENABLED
+No changes will be made to Active Directory.
+```
+
+This is especially useful for:
 
 - Development
 - Testing
 - Demonstrations
-- Troubleshooting
 - Training
-- Validation before production execution
-
-The objective is to allow the automation logic to be validated before authorized execution against real infrastructure.
+- Interviews
+- Customer presentations
 
 ---
 
-## 🛠️ Technologies
+## Configuration
 
-The project uses technologies commonly found in Microsoft infrastructure environments.
+Environment-specific configuration is kept outside the public source where appropriate.
 
-### Core
+Example files use neutral values such as:
 
-- PowerShell
-- PowerShell 7
-- Windows
+```text
+example.local
+example.onmicrosoft.com
+EMP
+```
+
+Local configuration files containing environment-specific values are excluded through `.gitignore`.
+
+---
+
+## Technologies
+
+- PowerShell 7+
+- Windows PowerShell modules where required by the target environment
+- Active Directory PowerShell module
+- Microsoft Graph PowerShell SDK
+- GroupPolicy PowerShell module
+- CIM / WMI
+- JSON
+- CSV
 - Git
 - GitHub
 
-### Microsoft Technologies
-
-- Active Directory
-- Microsoft Entra ID
-- Microsoft Graph PowerShell
-- Windows Management Instrumentation / CIM
-- Group Policy
-- BitLocker
-
-### Data & Reporting
-
-- JSON
-- CSV
-
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 PowerShell-Automation/
 │
 ├── 01-Password-Generator/
+│   ├── Generate-Password.ps1
+│   └── README.md
+│
 ├── 02-Configuration/
+│   ├── config.example.json
+│   ├── config.json              # Local / ignored
+│   ├── Configuration.psm1
+│   └── Validate-Configuration.ps1
+│
 ├── 03-AD-User-Provisioning/
+│   ├── AD-Configuration.json
+│   ├── AD-Functions.psm1
+│   ├── Provision-ADUser.ps1
+│   ├── Test-ADUserProvisioning.ps1
+│   └── README.md
+│
 ├── 04-Entra-ID-User-Provisioning/
+│   ├── Entra-Configuration.example.json
+│   ├── Entra-Configuration.json  # Local / ignored
+│   ├── Entra-Functions.psm1
+│   ├── Provision-EntraUser.ps1
+│   └── Test-EntraProvisioning.ps1
+│
 ├── 05-Computer-Inventory/
-│   └── Reports/
+│   ├── Computer-Inventory.ps1
+│   ├── Inventory-Configuration.json
+│   ├── Inventory-Functions.psm1
+│   ├── Test-ComputerInventory.ps1
+│   └── Reports/                  # Local / ignored
+│
 ├── 06-AD-Group-Management/
+│   ├── AD-Group-Management.ps1
+│   ├── Group-Configuration.json
+│   ├── Group-Functions.psm1
+│   ├── Test-ADGroupManagement.ps1
 │   └── Reports/
+│
 ├── 07-GPO-Management/
-│   └── Reports/
+│   ├── GPO-Management.ps1
+│   ├── GPO-Configuration.json
+│   ├── GPO-Functions.psm1
+│   └── Test-GPOManagement.ps1
+│
 ├── 08-Reporting/
-│   └── Reports/
+│   ├── Reporting.ps1
+│   ├── Reporting-Configuration.json
+│   ├── Reporting-Functions.psm1
+│   ├── Test-Reporting.ps1
+│   └── Reports/                  # Local / ignored
+│
+├── 09-Interface/
+│   ├── Interface.ps1
+│   ├── Interface-Functions.psm1
+│   └── Test-Interface.ps1
+│
 ├── .gitignore
 ├── LICENSE
 └── README.md
@@ -330,98 +391,113 @@ PowerShell-Automation/
 
 ---
 
-## 🚀 Usage
+## Usage
 
-Each module contains its own documentation with instructions for configuration, execution and testing.
+Clone the repository:
 
-General workflow:
-
-```text
-Configuration
-      ↓
-Validation
-      ↓
-Simulation / Connectivity Check
-      ↓
-Automation Execution
-      ↓
-Validation
-      ↓
-Report / Result
+```powershell
+git clone https://github.com/Adriano10Lacerda/PowerShell-Automation.git
 ```
 
-Before executing automation against a real environment, ensure that the required permissions and configuration have been validated.
+Enter the project directory:
+
+```powershell
+cd PowerShell-Automation
+```
+
+Start the central interface:
+
+```powershell
+. 9-Interface\Interface.ps1
+```
+
+Individual modules can also be executed directly from their respective directories.
 
 ---
 
-## 📊 Current Status
+## Current Status
 
-The project currently contains **8 automation modules** covering different areas of Windows and Microsoft infrastructure.
+The current version represents a functional V1 foundation of the PowerShell Automation Toolkit.
 
-Current development status:
+Implemented:
 
-- [x] Repository structure
-- [x] Git and GitHub setup
-- [x] Password Generator
-- [x] Configuration Module
+- [x] Secure Password Generator
+- [x] Configuration Validation
 - [x] Active Directory User Provisioning
-- [x] Entra ID User Provisioning
+- [x] Microsoft Entra ID User Provisioning
 - [x] Computer Inventory
-- [x] AD Group Management
+- [x] Active Directory Group Management
 - [x] GPO Management
 - [x] Reporting
-- [x] Automated testing
+- [x] Central Interface
 - [x] Simulation Mode
-- [x] Module documentation
-- [x] Repository cleanup
+- [x] Automated Testing
+- [x] Public configuration sanitization
 
 ---
 
-## 🔮 Roadmap
+## Roadmap
 
-Future improvements may include:
+Future versions may include:
 
-- [ ] Centralized logging
-- [ ] Improved error handling and diagnostics
-- [ ] Richer reporting
-- [ ] Excel/XLSX report generation
-- [ ] Remote computer inventory
-- [ ] Multi-computer inventory
-- [ ] Additional Active Directory automation
-- [ ] Microsoft 365 administration modules
-- [ ] BitLocker recovery automation
-- [ ] Improved user interface
-- [ ] Centralized configuration management
-- [ ] Installation and deployment process
-- [ ] Additional security controls
+- Improved graphical interface
+- Expanded Active Directory automation
+- Microsoft 365 administration
+- BitLocker recovery management
+- Advanced reporting
+- Logging and audit trails
+- WhatIf / preview execution
+- Role-based access controls
+- Installation and deployment package
+- Customer-specific configuration profiles
+- Licensing and commercial distribution
 
 ---
 
-## 💡 Project Goals
+## Project Goals
 
-The long-term goal is to evolve the project into a reusable **PowerShell IT Automation Toolkit** capable of supporting different infrastructure environments.
+The project is being developed with three main objectives:
 
-The architecture is intentionally designed to separate:
+### 1. Technical Development
 
-- Configuration
-- Business logic
-- Execution
-- Validation
-- Testing
-- Reporting
+Strengthen practical skills in:
 
-This allows new automation capabilities to be added without restructuring the entire project.
+- PowerShell
+- Active Directory
+- Microsoft Entra ID
+- Microsoft Graph
+- Windows infrastructure
+- Automation
+- Configuration management
+- Git and GitHub
+
+### 2. Professional Portfolio
+
+Demonstrate practical experience with:
+
+- Infrastructure automation
+- Identity management
+- Cloud administration
+- Enterprise IT operations
+- Security-conscious scripting
+- Modular PowerShell development
+
+### 3. Future Product
+
+The architecture is intentionally being developed with reusability and configurability in mind, allowing the toolkit to evolve into a broader IT automation product.
 
 ---
 
-## 👨‍💻 Author
+## Author
 
 **Adriano Felix Lacerda**
 
-Infrastructure | Cloud Computing | Microsoft Azure | PowerShell Automation | Microsoft 365 | Active Directory
+Infrastructure / Cloud / Automation
+
+GitHub: Adriano10Lacerda
 
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the terms defined in the `LICENSE` file.
+See the `LICENSE` file for licensing information.
