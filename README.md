@@ -2,6 +2,8 @@
 
 ## Enterprise IT Automation
 
+![PowerShell Automation Toolkit Interface](docs/interface.png)
+
 A modular PowerShell automation toolkit designed to automate common IT infrastructure and administration tasks across on-premises Active Directory, Microsoft Entra ID, endpoint inventory, Group Policy, reporting, and configuration management.
 
 The project is structured to be reusable across different environments through external configuration files, Simulation Mode, validation, error handling, and automated tests.
