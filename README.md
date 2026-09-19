@@ -262,7 +262,8 @@ Current documented test coverage:
 | 06 - AD Group Management | 19 |
 | 07 - GPO Management | 21 |
 | 08 - Reporting | 18 |
-| **Documented total** | **98** |
+| 09 - Interface | 19 |
+| **Total** | **117** |
 
 Module 09 also contains interface validation tests.
 
@@ -363,8 +364,7 @@ PowerShell-Automation/
 │   ├── AD-Group-Management.ps1
 │   ├── Group-Configuration.json
 │   ├── Group-Functions.psm1
-│   ├── Test-ADGroupManagement.ps1
-│   └── Reports/
+│   └── Test-ADGroupManagement.ps1
 │
 ├── 07-GPO-Management/
 │   ├── GPO-Management.ps1
