@@ -267,7 +267,7 @@ Current documented test coverage:
 
 Module 09 also contains interface validation tests.
 
-The tests validate configuration, module loading, input validation, simulation workflows, error handling, and expected outputs according to each module.
+The test suite covers 117 automated tests across modules 03–09, including configuration validation, module loading, input validation, simulation workflows, error handling, integration behavior, and expected outputs.
 
 ---
 
@@ -408,7 +408,7 @@ cd PowerShell-Automation
 Start the central interface:
 
 ```powershell
-. 9-Interface\Interface.ps1
+.\09-Interface\Interface.ps1
 ```
 
 Individual modules can also be executed directly from their respective directories.
@@ -417,7 +417,7 @@ Individual modules can also be executed directly from their respective directori
 
 ## Current Status
 
-The current version represents a functional V1 foundation of the PowerShell Automation Toolkit.
+The current version represents the completed V1 of the PowerShell Automation Toolkit with 9 integrated modules and 117 automated tests.
 
 Implemented:
 
