@@ -4,7 +4,6 @@
     "SimulationMode": true,
 
     "UserPrincipalName": {
-        "Enabled": true,
         "Domain": "example.onmicrosoft.com"
     },
 

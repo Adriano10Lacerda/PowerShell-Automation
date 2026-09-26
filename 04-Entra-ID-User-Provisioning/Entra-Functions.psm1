@@ -52,24 +52,13 @@ function Test-EntraConfiguration {
 
         $Errors += "A seção 'UserPrincipalName' não foi definida."
     }
-    else {
+    elseif (
+        [string]::IsNullOrWhiteSpace(
+            $Configuration.UserPrincipalName.Domain
+        )
+    ) {
 
-        if ($null -eq $Configuration.UserPrincipalName.Enabled) {
-
-            $Errors += "A propriedade 'UserPrincipalName.Enabled' não foi definida."
-        }
-
-        if ($Configuration.UserPrincipalName.Enabled -eq $true) {
-
-            if (
-                [string]::IsNullOrWhiteSpace(
-                    $Configuration.UserPrincipalName.Domain
-                )
-            ) {
-
-                $Errors += "O domínio do UserPrincipalName é obrigatório quando o UPN está habilitado."
-            }
-        }
+        $Errors += "O domínio do UserPrincipalName é obrigatório."
     }
 
     # ============================================================
@@ -185,18 +174,15 @@ function Test-EntraUserProvisioning {
     # UserPrincipalName
     # ============================================================
 
-    if ($Configuration.UserPrincipalName.Enabled -eq $true) {
+    if ([string]::IsNullOrWhiteSpace($User.UserPrincipalName)) {
 
-        if ([string]::IsNullOrWhiteSpace($User.UserPrincipalName)) {
+        $Errors += "O UserPrincipalName é obrigatório."
+    }
+    elseif (
+        $User.UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    ) {
 
-            $Errors += "O UserPrincipalName é obrigatório quando o UPN está habilitado."
-        }
-        elseif (
-            $User.UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$'
-        ) {
-
-            $Errors += "O UserPrincipalName possui um formato inválido."
-        }
+        $Errors += "O UserPrincipalName possui um formato inválido."
     }
 
     # ============================================================
