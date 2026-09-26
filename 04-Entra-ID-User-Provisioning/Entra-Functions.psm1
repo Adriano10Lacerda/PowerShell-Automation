@@ -442,8 +442,18 @@ Retornado: $($CreatedUser.DisplayName)
     # ============================================================
 
     if (
-        $CreatedUser.UserPrincipalName.ToLower() -ne
-        $ExpectedUser.UserPrincipalName.ToLower()
+        [string]::IsNullOrWhiteSpace($CreatedUser.UserPrincipalName) -or
+        [string]::IsNullOrWhiteSpace($ExpectedUser.UserPrincipalName)
+    ) {
+        throw "UserPrincipalName está vazio ou nulo."
+    }
+
+    if (
+        -not [string]::Equals(
+            $CreatedUser.UserPrincipalName,
+            $ExpectedUser.UserPrincipalName,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
     ) {
 
         throw @"

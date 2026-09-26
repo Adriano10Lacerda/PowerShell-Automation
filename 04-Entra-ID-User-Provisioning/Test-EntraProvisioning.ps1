@@ -342,32 +342,119 @@ catch {
 
 Write-Host ""
 
+
 # ============================================
-# TESTE 8 - PÓS-VALIDAÇÃO SEM GRAPH
+# TESTE 8 - PÓS-VALIDAÇÃO FUNCIONAL
 # ============================================
 
-Write-Host "Teste 8 - Validação da função de pós-provisionamento" -ForegroundColor Yellow
+Write-Host "Teste 8 - Pós-validação funcional" -ForegroundColor Yellow
 
-$TotalTests++
+# Simular resposta do Microsoft Graph
+function global:Get-MgUser {
+    param (
+        $UserId,
+        $Property,
+        $ErrorAction
+    )
 
-$PostValidationCommand = Get-Command `
-    Test-EntraUserPostProvisioning `
-    -ErrorAction SilentlyContinue
-
-if ($null -ne $PostValidationCommand) {
-
-    $PassedTests++
-
-    Write-Host "PASSOU - Função de pós-validação disponível." -ForegroundColor Green
+    return $global:MockEntraUser
 }
-else {
 
-    $FailedTests++
-
-    Write-Host "FALHOU - Função de pós-validação não encontrada." -ForegroundColor Red
+$ExpectedUser = [PSCustomObject]@{
+    DisplayName       = "Carlos Oliveira"
+    UserPrincipalName = "carlos.oliveira@example.onmicrosoft.com"
 }
+
+$Scenarios = @(
+    [PSCustomObject]@{
+        Name = "Usuário com dados corretos"
+        User = [PSCustomObject]@{
+            Id                = "id-123"
+            DisplayName       = "Carlos Oliveira"
+            UserPrincipalName = "carlos.oliveira@example.onmicrosoft.com"
+        }
+        UserId = "id-123"
+        ShouldPass = $true
+    },
+    [PSCustomObject]@{
+        Name = "ID divergente"
+        User = [PSCustomObject]@{
+            Id                = "id-999"
+            DisplayName       = "Carlos Oliveira"
+            UserPrincipalName = "carlos.oliveira@example.onmicrosoft.com"
+        }
+        UserId = "id-123"
+        ShouldPass = $false
+    },
+    [PSCustomObject]@{
+        Name = "UPN divergente"
+        User = [PSCustomObject]@{
+            Id                = "id-123"
+            DisplayName       = "Carlos Oliveira"
+            UserPrincipalName = "outro@example.onmicrosoft.com"
+        }
+        UserId = "id-123"
+        ShouldPass = $false
+    },
+    [PSCustomObject]@{
+        Name = "UPN nulo"
+        User = [PSCustomObject]@{
+            Id                = "id-123"
+            DisplayName       = "Carlos Oliveira"
+            UserPrincipalName = $null
+        }
+        UserId = "id-123"
+        ShouldPass = $false
+    }
+)
+
+foreach ($Scenario in $Scenarios) {
+
+    $TotalTests++
+    $global:MockEntraUser = $Scenario.User
+    $ActualPass = $false
+    $ErrorMessage = ""
+
+    try {
+        $Result = Test-EntraUserPostProvisioning `
+            -UserId $Scenario.UserId `
+            -ExpectedUser $ExpectedUser
+
+        $ActualPass = $true
+    }
+    catch {
+        $ErrorMessage = $_.Exception.Message
+    }
+
+    $TestPassed = ($ActualPass -eq $Scenario.ShouldPass)
+
+    if ($Scenario.Name -eq "UPN nulo") {
+        $TestPassed = (
+            $TestPassed -and
+            $ErrorMessage -match "UserPrincipalName está vazio ou nulo"
+        )
+    }
+
+    if ($TestPassed) {
+        $PassedTests++
+        Write-Host "PASSOU - $($Scenario.Name)" -ForegroundColor Green
+    }
+    else {
+        $FailedTests++
+        Write-Host "FALHOU - $($Scenario.Name)" -ForegroundColor Red
+
+        if ($ErrorMessage) {
+            Write-Host $ErrorMessage -ForegroundColor Red
+        }
+    }
+}
+
+# Remover a função simulada após os testes
+Remove-Item Function:\global:Get-MgUser -ErrorAction SilentlyContinue
+Remove-Variable MockEntraUser -Scope Global -ErrorAction SilentlyContinue
 
 Write-Host ""
+
 
 # ============================================
 # RESUMO DOS TESTES
@@ -384,11 +471,9 @@ Write-Host "Falharam        : $FailedTests" -ForegroundColor Red
 Write-Host ""
 
 if ($FailedTests -eq 0) {
-
     Write-Host "STATUS: TODOS OS TESTES PASSARAM" -ForegroundColor Green
 }
 else {
-
     Write-Host "STATUS: EXISTEM TESTES COM FALHA" -ForegroundColor Red
 }
 
