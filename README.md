@@ -259,17 +259,17 @@ Current documented test coverage:
 | Module | Tests |
 |---|---:|
 | 03 - AD User Provisioning | 19 |
-| 04 - Entra ID User Provisioning | 8 |
+| 04 - Entra ID User Provisioning | 13 |
 | 05 - Computer Inventory | 13 |
 | 06 - AD Group Management | 19 |
 | 07 - GPO Management | 21 |
 | 08 - Reporting | 18 |
 | 09 - Interface | 19 |
-| **Total** | **117** |
+| **Total** | **122** |
 
 Module 09 also contains interface validation tests.
 
-The test suite covers 117 automated tests across modules 03–09, including configuration validation, module loading, input validation, simulation workflows, error handling, integration behavior, and expected outputs.
+The test suite covers 122 automated tests across modules 03–09, including configuration validation, module loading, input validation, simulation workflows, error handling, integration behavior, and expected outputs. All 122 tests passed in the latest reported validation run; this does not replace environment-specific integration and acceptance testing.
 
 ---
 
@@ -419,7 +419,7 @@ Individual modules can also be executed directly from their respective directori
 
 ## Current Status
 
-The current version represents the completed V1 of the PowerShell Automation Toolkit with 9 integrated modules and 117 automated tests.
+The toolkit currently includes 9 modules and 122 automated tests. The latest reported test run passed all 122 tests. Final release readiness still depends on completing the remaining documentation, integration, security, and packaging checks.
 
 Implemented:
 
