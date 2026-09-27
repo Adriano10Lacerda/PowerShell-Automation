@@ -342,7 +342,6 @@ catch {
 
 Write-Host ""
 
-
 # ============================================
 # TESTE 8 - PÓS-VALIDAÇÃO FUNCIONAL
 # ============================================
@@ -405,6 +404,26 @@ $Scenarios = @(
         }
         UserId = "id-123"
         ShouldPass = $false
+    },
+    [PSCustomObject]@{
+        Name = "UPN vazio"
+        User = [PSCustomObject]@{
+            Id                = "id-123"
+            DisplayName       = "Carlos Oliveira"
+            UserPrincipalName = ""
+        }
+        UserId = "id-123"
+        ShouldPass = $false
+    },
+    [PSCustomObject]@{
+        Name = "UPN com letras maiúsculas"
+        User = [PSCustomObject]@{
+            Id                = "id-123"
+            DisplayName       = "Carlos Oliveira"
+            UserPrincipalName = "CARLOS.OLIVEIRA@EXAMPLE.ONMICROSOFT.COM"
+        }
+        UserId = "id-123"
+        ShouldPass = $true
     }
 )
 
@@ -428,7 +447,7 @@ foreach ($Scenario in $Scenarios) {
 
     $TestPassed = ($ActualPass -eq $Scenario.ShouldPass)
 
-    if ($Scenario.Name -eq "UPN nulo") {
+    if (@("UPN nulo", "UPN vazio") -contains $Scenario.Name) {
         $TestPassed = (
             $TestPassed -and
             $ErrorMessage -match "UserPrincipalName está vazio ou nulo"
@@ -454,7 +473,6 @@ Remove-Item Function:\global:Get-MgUser -ErrorAction SilentlyContinue
 Remove-Variable MockEntraUser -Scope Global -ErrorAction SilentlyContinue
 
 Write-Host ""
-
 
 # ============================================
 # RESUMO DOS TESTES
