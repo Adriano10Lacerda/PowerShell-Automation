@@ -44,42 +44,17 @@ catch
     exit
 }
 
-# Função para gerar índice aleatório criptograficamente seguro
-function Get-SecureRandomIndex
-{
-    param (
-        [Parameter(Mandatory = $true)]
-        [ValidateRange(1, [int]::MaxValue)]
-        [int]$Maximum
-    )
 
-    $Random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
 
-    try
-    {
-        $Bytes = New-Object byte[] 4
+# Carrega o módulo de funções do gerador
+$CaminhoFuncoes = Join-Path $PSScriptRoot "Password-Functions.psm1"
 
-        # Calcula o maior valor que pode ser utilizado
-        # sem introduzir modulo bias.
-        $Limit = [uint64]::MaxValue - (
-            ([uint64]::MaxValue + 1) % [uint64]$Maximum
-        )
-
-        do
-        {
-            $Random.GetBytes($Bytes)
-
-            $Numero = [uint64][BitConverter]::ToUInt32($Bytes, 0)
-        }
-        while ($Numero -gt $Limit)
-
-        return [int]($Numero % $Maximum)
-    }
-    finally
-    {
-        $Random.Dispose()
-    }
+if (-not (Test-Path $CaminhoFuncoes)) {
+    throw "Erro: Password-Functions.psm1 nao encontrado."
 }
+
+Import-Module $CaminhoFuncoes -Force
+
 
 # Obtém valores da configuração
 $Prefixo = $Config.Prefixo
@@ -90,51 +65,12 @@ $Especiais = $Config.CaracteresEspeciais
 # Obtém a data conforme configuração
 $Data = Get-Date -Format $FormatoData
 
-# Grupos de caracteres
-$Maiusculas = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-$Minusculas = "abcdefghijklmnopqrstuvwxyz"
-$Numeros = "0123456789"
-
-# Seleciona um caractere obrigatório de cada grupo
-$Obrigatorios = @(
-    $Maiusculas[(Get-SecureRandomIndex -Maximum $Maiusculas.Length)]
-    $Minusculas[(Get-SecureRandomIndex -Maximum $Minusculas.Length)]
-    $Numeros[(Get-SecureRandomIndex -Maximum $Numeros.Length)]
-    $Especiais[(Get-SecureRandomIndex -Maximum $Especiais.Length)]
-)
-
-# Embaralha os caracteres obrigatórios
-$Embaralhados = New-Object System.Collections.Generic.List[string]
-
-foreach ($Caractere in $Obrigatorios)
-{
-    $Embaralhados.Add($Caractere)
-}
-
-for ($i = $Embaralhados.Count - 1; $i -gt 0; $i--)
-{
-    $Posicao = Get-SecureRandomIndex -Maximum ($i + 1)
-
-    $Temporario = $Embaralhados[$i]
-    $Embaralhados[$i] = $Embaralhados[$Posicao]
-    $Embaralhados[$Posicao] = $Temporario
-}
-
-# Junta todos os grupos
-$Caracteres = $Maiusculas + $Minusculas + $Numeros + $Especiais
-
-# Começa a parte aleatória
-$ParteAleatoria = $Embaralhados -join ""
-
-# Gera os caracteres restantes
-for ($i = 4; $i -lt $QuantidadeCaracteres; $i++)
-{
-    $Posicao = Get-SecureRandomIndex -Maximum $Caracteres.Length
-    $ParteAleatoria += $Caracteres[$Posicao]
-}
-
-# Monta a senha final
-$Senha = $Prefixo + $Data + $ParteAleatoria
+# Gera a senha usando o módulo de funções
+$Senha = New-SecurePassword `
+    -Prefixo $Prefixo `
+    -Data $Data `
+    -QuantidadeCaracteres $QuantidadeCaracteres `
+    -CaracteresEspeciais $Especiais
 
 # Exibe o resultado
 Write-Host ""

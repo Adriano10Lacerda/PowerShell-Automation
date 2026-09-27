@@ -1,3 +1,4 @@
+
 # ===========================================
 # Enterprise Configuration Module
 # Author: Adriano Felix Lacerda
@@ -10,14 +11,17 @@ function Get-Configuration
         [string]$ConfigurationPath
     )
 
-    if (-not (Test-Path $ConfigurationPath))
+    # Valida a existencia do arquivo
+    if (-not (Test-Path -LiteralPath $ConfigurationPath -PathType Leaf))
     {
         throw "Arquivo de configuracao nao encontrado: $ConfigurationPath"
     }
 
+    # Carrega e valida o JSON
     try
     {
-        $Config = Get-Content $ConfigurationPath -Raw | ConvertFrom-Json
+        $Config = Get-Content -LiteralPath $ConfigurationPath -Raw |
+            ConvertFrom-Json -ErrorAction Stop
     }
     catch
     {
@@ -40,7 +44,6 @@ function Get-Configuration
     else
     {
         $QuantidadeTexto = $Config.QuantidadeCaracteres.ToString()
-
         $QuantidadeInteira = 0
 
         $EhInteiro = [int]::TryParse(
@@ -55,6 +58,10 @@ function Get-Configuration
         elseif ($QuantidadeInteira -lt 4)
         {
             $Erros += "QuantidadeCaracteres deve ser no minimo 4."
+        }
+        elseif ($QuantidadeInteira -gt 128)
+        {
+            $Erros += "QuantidadeCaracteres deve ser no maximo 128."
         }
     }
 
@@ -133,7 +140,8 @@ function Get-Configuration
         {
             try
             {
-                Get-Date -Format $Config.FormatoData -ErrorAction Stop | Out-Null
+                Get-Date -Format $Config.FormatoData -ErrorAction Stop |
+                    Out-Null
             }
             catch
             {
@@ -146,6 +154,10 @@ function Get-Configuration
     if ([string]::IsNullOrWhiteSpace($Config.CaracteresEspeciais))
     {
         $Erros += "O campo CaracteresEspeciais nao pode ficar vazio."
+    }
+    elseif ($Config.CaracteresEspeciais -match '[A-Za-z0-9\s]')
+    {
+        $Erros += "CaracteresEspeciais nao pode conter letras, numeros ou espacos."
     }
 
     # Interrompe se houver erros
