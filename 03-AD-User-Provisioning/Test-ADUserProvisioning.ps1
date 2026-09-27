@@ -1,3 +1,4 @@
+
 # ============================================
 # Testes - AD User Provisioning
 # ============================================
@@ -7,13 +8,26 @@ $ErrorActionPreference = "Stop"
 $ModulePath = Join-Path $PSScriptRoot "AD-Functions.psm1"
 $ConfigurationPath = Join-Path $PSScriptRoot "AD-Configuration.json"
 
+if (-not (Test-Path $ModulePath)) {
+    throw "Módulo não encontrado: $ModulePath"
+}
+
+if (-not (Test-Path $ConfigurationPath)) {
+    throw "Configuração não encontrada: $ConfigurationPath"
+}
+
 Import-Module $ModulePath -Force
 
-$Configuration = Get-Content $ConfigurationPath -Raw | ConvertFrom-Json
+$Configuration = Get-Content $ConfigurationPath -Raw |
+    ConvertFrom-Json -ErrorAction Stop
 
 $Passed = 0
 $Failed = 0
 $Total = 0
+
+# ============================================
+# Função auxiliar para executar testes
+# ============================================
 
 function Invoke-Test {
     param (
@@ -40,24 +54,51 @@ function Invoke-Test {
 }
 
 # ============================================
+# Função auxiliar para validar erros esperados
+# ============================================
+
+function Assert-Throws {
+    param (
+        [Parameter(Mandatory)]
+        [scriptblock]$Action,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedMessage
+    )
+
+    $CaughtError = $null
+
+    try {
+        & $Action
+    }
+    catch {
+        $CaughtError = $_
+    }
+
+    if ($null -eq $CaughtError) {
+        throw "Era esperado um erro contendo: '$ExpectedMessage', mas nenhum erro foi gerado."
+    }
+
+    if ($CaughtError.Exception.Message -notmatch $ExpectedMessage) {
+        throw "Mensagem de erro inesperada. Esperado: '$ExpectedMessage'. Recebido: '$($CaughtError.Exception.Message)'"
+    }
+}
+
+# ============================================
 # 1. Configuração
 # ============================================
 
 Invoke-Test "Configuração atual é válida" {
-
-    Test-ADConfiguration `
-        -Configuration $Configuration | Out-Null
+    Test-ADConfiguration -Configuration $Configuration | Out-Null
 }
 
 Invoke-Test "SimulationMode está habilitado" {
-
     if ($Configuration.SimulationMode -ne $true) {
         throw "SimulationMode deveria estar habilitado."
     }
 }
 
 Invoke-Test "Tipos de usuário estão configurados" {
-
     $UserTypes = @(
         $Configuration.UserTypes.PSObject.Properties.Name
     )
@@ -72,7 +113,6 @@ Invoke-Test "Tipos de usuário estão configurados" {
 # ============================================
 
 Invoke-Test "Usuário válido é aceito" {
-
     Test-ADUserProvisioning `
         -FirstName "Maria" `
         -LastName "Silva" `
@@ -81,76 +121,44 @@ Invoke-Test "Usuário válido é aceito" {
 }
 
 Invoke-Test "Primeiro nome vazio é rejeitado" {
-
-    try {
+    Assert-Throws -ExpectedMessage "primeiro nome" -Action {
         Test-ADUserProvisioning `
             -FirstName " " `
             -LastName "Silva" `
             -SamAccountName "silva.maria" `
             -Configuration $Configuration | Out-Null
-
-        throw "Era esperado erro para FirstName vazio."
-    }
-    catch {
-        if ($_.Exception.Message -notmatch "primeiro nome") {
-            throw
-        }
     }
 }
 
 Invoke-Test "Sobrenome vazio é rejeitado" {
-
-    try {
+    Assert-Throws -ExpectedMessage "sobrenome" -Action {
         Test-ADUserProvisioning `
             -FirstName "Maria" `
             -LastName " " `
             -SamAccountName "maria" `
             -Configuration $Configuration | Out-Null
-
-        throw "Era esperado erro para LastName vazio."
-    }
-    catch {
-        if ($_.Exception.Message -notmatch "sobrenome") {
-            throw
-        }
     }
 }
 
 Invoke-Test "SamAccountName com caracteres inválidos é rejeitado" {
-
-    try {
+    Assert-Throws -ExpectedMessage "caracteres inválidos" -Action {
         Test-ADUserProvisioning `
             -FirstName "Maria" `
             -LastName "Silva" `
             -SamAccountName "silva maria" `
             -Configuration $Configuration | Out-Null
-
-        throw "Era esperado erro para caracteres inválidos."
-    }
-    catch {
-        if ($_.Exception.Message -notmatch "caracteres inválidos") {
-            throw
-        }
     }
 }
 
 Invoke-Test "SamAccountName acima do limite é rejeitado" {
-
     $LongSam = "abcdefghijklmnopqrstu"
 
-    try {
+    Assert-Throws -ExpectedMessage "mais de" -Action {
         Test-ADUserProvisioning `
             -FirstName "Maria" `
             -LastName "Silva" `
             -SamAccountName $LongSam `
             -Configuration $Configuration | Out-Null
-
-        throw "Era esperado erro para SamAccountName acima do limite."
-    }
-    catch {
-        if ($_.Exception.Message -notmatch "mais de") {
-            throw
-        }
     }
 }
 
@@ -159,7 +167,6 @@ Invoke-Test "SamAccountName acima do limite é rejeitado" {
 # ============================================
 
 Invoke-Test "Employee gera SamAccountName correto" {
-
     $Result = Get-ADSamAccountName `
         -FirstName "Maria" `
         -LastName "Silva" `
@@ -172,7 +179,6 @@ Invoke-Test "Employee gera SamAccountName correto" {
 }
 
 Invoke-Test "Contractor aplica sufixo corretamente" {
-
     $Result = Get-ADSamAccountName `
         -FirstName "Maria" `
         -LastName "Silva" `
@@ -185,7 +191,6 @@ Invoke-Test "Contractor aplica sufixo corretamente" {
 }
 
 Invoke-Test "Intern aplica sufixo corretamente" {
-
     $Result = Get-ADSamAccountName `
         -FirstName "Andre" `
         -LastName "Oliveira" `
@@ -198,7 +203,6 @@ Invoke-Test "Intern aplica sufixo corretamente" {
 }
 
 Invoke-Test "Acentos são removidos" {
-
     $Result = Get-ADSamAccountName `
         -FirstName "João" `
         -LastName "Gonçalves" `
@@ -211,20 +215,12 @@ Invoke-Test "Acentos são removidos" {
 }
 
 Invoke-Test "Tipo de usuário inexistente é rejeitado" {
-
-    try {
+    Assert-Throws -ExpectedMessage "não está configurado" -Action {
         Get-ADSamAccountName `
             -FirstName "Maria" `
             -LastName "Silva" `
             -UserType "Unknown" `
             -Configuration $Configuration | Out-Null
-
-        throw "Era esperado erro para tipo inexistente."
-    }
-    catch {
-        if ($_.Exception.Message -notmatch "não está configurado") {
-            throw
-        }
     }
 }
 
@@ -233,7 +229,6 @@ Invoke-Test "Tipo de usuário inexistente é rejeitado" {
 # ============================================
 
 Invoke-Test "SamAccountName disponível permanece igual" {
-
     $Result = Get-UniqueADSamAccountName `
         -SamAccountName "novo.usuario" `
         -Configuration $Configuration `
@@ -247,7 +242,6 @@ Invoke-Test "SamAccountName disponível permanece igual" {
 }
 
 Invoke-Test "Duplicidade gera próximo SamAccountName disponível" {
-
     $Result = Get-UniqueADSamAccountName `
         -SamAccountName "silva.maria.ext" `
         -Configuration $Configuration `
@@ -263,7 +257,6 @@ Invoke-Test "Duplicidade gera próximo SamAccountName disponível" {
 }
 
 Invoke-Test "Duplicidade respeita limite de caracteres" {
-
     $Result = Get-UniqueADSamAccountName `
         -SamAccountName "abcdefghijklmno.ext" `
         -Configuration $Configuration `
@@ -281,20 +274,12 @@ Invoke-Test "Duplicidade respeita limite de caracteres" {
 # ============================================
 
 Invoke-Test "Nome longo dispara política Manual" {
-
-    try {
+    Assert-Throws -ExpectedMessage "ultrapassa o limite" -Action {
         Get-ADSamAccountName `
             -FirstName "Alexandre" `
             -LastName "Nascimentosilva" `
             -UserType "Contractor" `
             -Configuration $Configuration | Out-Null
-
-        throw "Era esperado erro para nome acima do limite."
-    }
-    catch {
-        if ($_.Exception.Message -notmatch "ultrapassa o limite") {
-            throw
-        }
     }
 }
 
@@ -303,9 +288,7 @@ Invoke-Test "Nome longo dispara política Manual" {
 # ============================================
 
 Invoke-Test "Modo de simulação não conecta ao AD" {
-
-    $Result = Test-ADConnectivity `
-        -Configuration $Configuration
+    $Result = Test-ADConnectivity -Configuration $Configuration
 
     if ($Result.Simulation -ne $true) {
         throw "O resultado deveria indicar Simulation = true."
@@ -321,7 +304,6 @@ Invoke-Test "Modo de simulação não conecta ao AD" {
 # ============================================
 
 Invoke-Test "Provisionamento simulado não realiza alteração real" {
-
     $User = [PSCustomObject]@{
         FirstName         = "Maria"
         LastName          = "Silva"
@@ -346,6 +328,114 @@ Invoke-Test "Provisionamento simulado não realiza alteração real" {
     if ($Result.SamAccountName -ne $User.SamAccountName) {
         throw "SamAccountName retornado não corresponde ao usuário."
     }
+}
+
+# ============================================
+# 8. Validação de segurança do provisionamento
+# ============================================
+
+Invoke-Test "UPN vazio é rejeitado quando o recurso está habilitado" {
+
+    $User = [PSCustomObject]@{
+        FirstName         = "Maria"
+        LastName          = "Silva"
+        DisplayName       = "Maria Silva"
+        UserType          = "Employee"
+        SamAccountName    = "maria.silva.test"
+        UserPrincipalName = $null
+    }
+
+    Assert-Throws -ExpectedMessage "UserPrincipalName não pode estar vazio" -Action {
+        New-ADUserProvision `
+            -User $User `
+            -Configuration $Configuration | Out-Null
+    }
+}
+
+Invoke-Test "UPN com domínio diferente do configurado é rejeitado" {
+
+    $User = [PSCustomObject]@{
+        FirstName         = "Maria"
+        LastName          = "Silva"
+        DisplayName       = "Maria Silva"
+        UserType          = "Employee"
+        SamAccountName    = "maria.silva.test"
+        UserPrincipalName = "maria.silva.test@outro.local"
+    }
+
+    Assert-Throws -ExpectedMessage "deve corresponder" -Action {
+        New-ADUserProvision `
+            -User $User `
+            -Configuration $Configuration | Out-Null
+    }
+}
+
+Invoke-Test "SamAccountName inválido é rejeitado no provisionamento direto" {
+
+    $User = [PSCustomObject]@{
+        FirstName         = "Maria"
+        LastName          = "Silva"
+        DisplayName       = "Maria Silva"
+        UserType          = "Employee"
+        SamAccountName    = "maria silva"
+        UserPrincipalName = "maria silva@example.local"
+    }
+
+    Assert-Throws -ExpectedMessage "caracteres inválidos" -Action {
+        New-ADUserProvision `
+            -User $User `
+            -Configuration $Configuration | Out-Null
+    }
+}
+
+Invoke-Test "Provisionamento aceita UPN desabilitado" {
+
+    $TestConfiguration = $Configuration |
+        ConvertTo-Json -Depth 100 |
+        ConvertFrom-Json
+
+    $TestConfiguration.UserPrincipalName.Enabled = $false
+
+    $User = [PSCustomObject]@{
+        FirstName         = "Maria"
+        LastName          = "Silva"
+        DisplayName       = "Maria Silva"
+        UserType          = "Employee"
+        SamAccountName    = "maria.silva.test"
+        UserPrincipalName = $null
+    }
+
+    $Result = New-ADUserProvision `
+        -User $User `
+        -Configuration $TestConfiguration
+
+    if ($Result.Success -ne $true) {
+        throw "O provisionamento deveria ser aceito com UPN desabilitado."
+    }
+
+    if ($Result.Simulation -ne $true) {
+        throw "O resultado deveria indicar modo de simulação."
+    }
+}
+
+Invoke-Test "Tipo inexistente é rejeitado no provisionamento direto" {
+
+    $User = [PSCustomObject]@{
+        FirstName         = "Maria"
+        LastName          = "Silva"
+        DisplayName       = "Maria Silva"
+        UserType          = "InvalidUserType"
+        SamAccountName    = "maria.silva.test"
+        UserPrincipalName = "maria.silva.test@example.local"
+    }
+
+    Assert-Throws `
+        -ExpectedMessage "não encontrado na configuração" `
+        -Action {
+            New-ADUserProvision `
+                -User $User `
+                -Configuration $Configuration | Out-Null
+        }
 }
 
 # ============================================

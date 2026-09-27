@@ -800,6 +800,61 @@ function New-ADUserProvision {
     )
 
     # ========================================
+    # Validar dados obrigatórios do usuário
+    # ========================================
+
+    if ([string]::IsNullOrWhiteSpace($User.DisplayName)) {
+        throw "O campo 'DisplayName' não pode estar vazio."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($User.UserType)) {
+        throw "O campo 'UserType' não pode estar vazio."
+    }
+
+    # Validar se o tipo de usuário existe na configuração
+    $validUserTypes = @(
+        $Configuration.UserTypes.PSObject.Properties.Name
+    )
+
+    if ($User.UserType -notin $validUserTypes) {
+        throw "Tipo de usuário '$($User.UserType)' não encontrado na configuração."
+    }
+
+    # ========================================
+    # Validar nome, sobrenome e SamAccountName
+    # ========================================
+
+    Test-ADUserProvisioning `
+        -FirstName $User.FirstName `
+        -LastName $User.LastName `
+        -SamAccountName $User.SamAccountName `
+        -Configuration $Configuration `
+        -ErrorAction Stop | Out-Null
+
+    # ========================================
+    # Validar UserPrincipalName
+    # ========================================
+
+    if ($Configuration.UserPrincipalName.Enabled -eq $true) {
+
+        $UPNSuffix = $Configuration.UserPrincipalName.Domain
+
+        if ([string]::IsNullOrWhiteSpace($UPNSuffix)) {
+            throw "O domínio do UserPrincipalName não foi configurado."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($User.UserPrincipalName)) {
+            throw "O UserPrincipalName não pode estar vazio quando o recurso está habilitado."
+        }
+
+        $ExpectedUPN = "$($User.SamAccountName)@$($UPNSuffix)"
+
+        if ($User.UserPrincipalName -ine $ExpectedUPN) {
+            throw "O UserPrincipalName deve corresponder ao SamAccountName e ao domínio configurado: '$ExpectedUPN'."
+        }
+    }
+
+    # ========================================
     # Modo de simulação
     # ========================================
 
@@ -822,10 +877,10 @@ function New-ADUserProvision {
         Write-Host "Nenhuma alteração foi realizada no Active Directory." -ForegroundColor Green
 
         return [PSCustomObject]@{
-            Success = $true
-            Simulation = $true
+            Success        = $true
+            Simulation     = $true
             SamAccountName = $User.SamAccountName
-            Message = "Provisionamento executado em modo de simulação."
+            Message        = "Provisionamento executado em modo de simulação."
         }
     }
 
@@ -834,7 +889,6 @@ function New-ADUserProvision {
     # ========================================
 
     if ([string]::IsNullOrWhiteSpace($Configuration.DomainController)) {
-
         throw "O campo 'DomainController' deve ser configurado para realizar o provisionamento real."
     }
 
@@ -843,7 +897,6 @@ function New-ADUserProvision {
     # ========================================
 
     if ([string]::IsNullOrWhiteSpace($Configuration.TargetOU)) {
-
         throw "O campo 'TargetOU' deve ser configurado para realizar o provisionamento real."
     }
 
@@ -856,7 +909,6 @@ function New-ADUserProvision {
         -ErrorAction Stop
 
     if (-not $ADConnectivity.Connected) {
-
         throw "O Active Directory não está disponível para realizar o provisionamento."
     }
 
@@ -865,9 +917,8 @@ function New-ADUserProvision {
     # ========================================
 
     if (Test-ADUserExists `
-    -SamAccountName $User.SamAccountName `
-    -Configuration $Configuration
-        ) {
+        -SamAccountName $User.SamAccountName `
+        -Configuration $Configuration) {
 
         throw "O usuário '$($User.SamAccountName)' já existe no Active Directory."
     }
@@ -879,30 +930,32 @@ function New-ADUserProvision {
     try {
 
         $ADUserParameters = @{
-            Name              = $User.DisplayName
-            GivenName         = $User.FirstName
-            Surname           = $User.LastName
-            DisplayName       = $User.DisplayName
-            SamAccountName    = $User.SamAccountName
-            UserPrincipalName = $User.UserPrincipalName
-            Path              = $Configuration.TargetOU
-            Server            = $Configuration.DomainController
-            Enabled           = $false
-            ErrorAction       = "Stop"
+            Name           = $User.DisplayName
+            GivenName      = $User.FirstName
+            Surname        = $User.LastName
+            DisplayName    = $User.DisplayName
+            SamAccountName = $User.SamAccountName
+            Path           = $Configuration.TargetOU
+            Server         = $Configuration.DomainController
+            Enabled        = $false
+            ErrorAction    = "Stop"
+        }
+
+        if ($Configuration.UserPrincipalName.Enabled -eq $true) {
+            $ADUserParameters.UserPrincipalName = $User.UserPrincipalName
         }
 
         $CreatedUser = New-ADUser @ADUserParameters -PassThru
 
         return [PSCustomObject]@{
-            Success = $true
-            Simulation = $false
-            SamAccountName = $CreatedUser.SamAccountName
+            Success           = $true
+            Simulation        = $false
+            SamAccountName    = $CreatedUser.SamAccountName
             DistinguishedName = $CreatedUser.DistinguishedName
-            Message = "Usuário criado com sucesso no Active Directory."
+            Message           = "Usuário criado com sucesso no Active Directory."
         }
     }
     catch {
-
         throw "Não foi possível criar o usuário '$($User.SamAccountName)' no Active Directory. Detalhes: $($_.Exception.Message)"
     }
 }
