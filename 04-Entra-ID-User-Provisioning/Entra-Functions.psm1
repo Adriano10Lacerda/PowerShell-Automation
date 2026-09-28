@@ -268,11 +268,8 @@ Instale o módulo Microsoft.Graph.Users antes de continuar.
 
         $Message = $_.Exception.Message
 
-        if (
-            $Message -match "Resource .* does not exist" -or
-            $Message -match "does not exist" -or
-            $Message -match "Request_ResourceNotFound"
-        ) {
+        # Reconhecer somente o erro específico de recurso não encontrado.
+        if ($Message -match '(?i)\bRequest_ResourceNotFound\b') {
 
             return $false
         }
@@ -284,7 +281,6 @@ Detalhes: $Message
 "@
     }
 }
-
 
 function Test-EntraTenantConnection {
 
