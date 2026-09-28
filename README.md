@@ -252,24 +252,26 @@ The public repository is designed to contain examples and source code without ex
 
 ## Automated Testing
 
-The project contains automated tests for the main modules.
+The project includes automated test scripts for all nine modules.
 
-Current documented test coverage:
-
-| Module | Tests |
+| Module | Tests Passed |
 |---|---:|
-| 03 - AD User Provisioning | 19 |
+| 01 - Password Generator | 23 |
+| 02 - Configuration | 17 |
+| 03 - AD User Provisioning | 24 |
 | 04 - Entra ID User Provisioning | 13 |
 | 05 - Computer Inventory | 13 |
 | 06 - AD Group Management | 19 |
 | 07 - GPO Management | 21 |
 | 08 - Reporting | 18 |
 | 09 - Interface | 19 |
-| **Total** | **122** |
+| **Total** | **167** |
 
-Module 09 also contains interface validation tests.
+Module 09 also includes interface validation tests.
 
-The test suite covers 122 automated tests across modules 03–09, including configuration validation, module loading, input validation, simulation workflows, error handling, integration behavior, and expected outputs. All 122 tests passed in the latest reported validation run; this does not replace environment-specific integration and acceptance testing.
+All 167 tests passed in the latest reported test run.
+
+These results reflect the automated test scripts executed in the development environment. They do not replace real-environment integration testing, security validation, or acceptance testing.
 
 ---
 
@@ -308,6 +310,56 @@ EMP
 ```
 
 Local configuration files containing environment-specific values are excluded through `.gitignore`.
+
+---
+
+## Prerequisites and Dependencies
+
+### General requirements
+
+- Windows environment for modules that rely on Windows-specific administration features.
+- PowerShell 7 or later for the toolkit's documented baseline. Some Windows administration modules may require Windows PowerShell compatibility or a supported Windows environment.
+- Git, if cloning or managing the repository from source.
+- Appropriate permissions and connectivity for the target environment when running real operations.
+
+### Module-specific dependencies
+
+| Module | Dependency / requirement |
+|---|---|
+| 01 - Password Generator | PowerShell runtime; no additional external module identified |
+| 02 - Configuration | PowerShell runtime; JSON support |
+| 03 - AD User Provisioning | Active Directory PowerShell module (`ActiveDirectory`); domain connectivity and suitable permissions for real provisioning |
+| 04 - Entra ID User Provisioning | Microsoft Graph PowerShell SDK, including `Microsoft.Graph.Users` and authentication support; a valid Entra tenant, sign-in, required permissions, and network access for real operations |
+| 05 - Computer Inventory | Windows CIM/WMI and access to the target computer; BitLocker-related information depends on OS and permissions |
+| 06 - AD Group Management | Active Directory PowerShell module (`ActiveDirectory`); domain connectivity and suitable permissions for real group operations |
+| 07 - GPO Management | Group Policy PowerShell module (`GroupPolicy`); domain connectivity and suitable permissions for real GPO operations |
+| 08 - Reporting | PowerShell runtime; JSON/CSV data files |
+| 09 - Interface & Toolkit Launcher | PowerShell runtime and the project files for the modules being launched |
+
+### Installing Microsoft Graph PowerShell modules
+
+Run in a PowerShell session with access to the PowerShell Gallery:
+
+```powershell
+Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
+Install-Module Microsoft.Graph.Users -Scope CurrentUser
+```
+
+For real Entra ID operations, authenticate to the intended tenant with the permissions required by the operation. The toolkit's simulation tests do not establish that tenant authentication or real provisioning has been validated.
+
+### Active Directory and Group Policy modules
+
+The `ActiveDirectory` and `GroupPolicy` modules are generally provided through the Remote Server Administration Tools (RSAT) on supported Windows environments. Their availability depends on the Windows edition, installed administration tools, and target environment.
+
+Check whether the modules are available:
+
+```powershell
+Get-Module -ListAvailable ActiveDirectory, GroupPolicy
+```
+
+Install or enable the appropriate RSAT components using the supported method for the Windows version and environment. Domain connectivity and authorized permissions are required for real changes.
+
+> **Important:** Simulation Mode and passing automated tests do not guarantee that a module is ready for production. Validate configuration, permissions, connectivity, and expected behavior in a controlled environment before performing real operations.
 
 ---
 
@@ -419,7 +471,7 @@ Individual modules can also be executed directly from their respective directori
 
 ## Current Status
 
-The toolkit currently includes 9 modules and 122 automated tests. The latest reported test run passed all 122 tests. Final release readiness still depends on completing the remaining documentation, integration, security, and packaging checks.
+The toolkit currently includes 9 modules and 167 automated tests. All 167 tests passed in the latest reported test run. Final release readiness still depends on completing the remaining documentation, integration, security, and packaging checks.
 
 Implemented:
 
@@ -496,7 +548,7 @@ The architecture is intentionally being developed with reusability and configura
 
 Infrastructure / Cloud / Automation
 
-GitHub: Adriano10Lacerda
+GitHub: [Adriano10Lacerda](https://github.com/Adriano10Lacerda)
 
 ---
 
