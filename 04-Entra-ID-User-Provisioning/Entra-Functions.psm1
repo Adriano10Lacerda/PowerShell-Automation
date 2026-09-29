@@ -11,27 +11,37 @@ function Test-EntraConfiguration {
     # SimulationMode
     # ============================================================
 
-    if ($null -eq $Configuration.SimulationMode) {
+    if ($Configuration.SimulationMode -isnot [bool]) {
 
-        $Errors += "A configuração 'SimulationMode' não foi definida."
+        $Errors += "A configuração 'SimulationMode' deve ser um valor booleano (`$true ou `$false)."
     }
 
     # ============================================================
     # TenantId
     # ============================================================
 
-    if ($Configuration.SimulationMode -eq $false) {
+    if ($Configuration.SimulationMode -is [bool] -and
+        $Configuration.SimulationMode -eq $false) {
 
         if ([string]::IsNullOrWhiteSpace($Configuration.TenantId)) {
 
             $Errors += "O 'TenantId' é obrigatório quando o modo de simulação está desabilitado."
         }
-        elseif ($Configuration.TenantId -notmatch '^[0-9a-fA-F-]{36}$') {
+        else {
 
-            $Errors += "O 'TenantId' não possui um formato válido."
+            $TenantGuid = [guid]::Empty
+
+            if (
+                -not [guid]::TryParse(
+                    [string]$Configuration.TenantId,
+                    [ref]$TenantGuid
+                )
+            ) {
+
+                $Errors += "O 'TenantId' não possui um formato válido."
+            }
         }
     }
-
     # ============================================================
     # Domain
     # ============================================================
@@ -143,6 +153,21 @@ function Test-EntraUserProvisioning {
     )
 
     $Errors = @()
+
+        # ============================================================
+    # AccountEnabled
+    # ============================================================
+
+    $AccountEnabledProperty = $User.PSObject.Properties['AccountEnabled']
+
+    if ($null -eq $AccountEnabledProperty) {
+
+        $Errors += "O AccountEnabled é obrigatório."
+    }
+    elseif ($AccountEnabledProperty.Value -isnot [bool]) {
+
+        $Errors += "O AccountEnabled deve ser um valor booleano (`$true ou `$false)."
+    }
 
     # ============================================================
     # FirstName
@@ -484,6 +509,13 @@ function New-EntraUserProvision {
         [PSCustomObject]$Configuration
     )
 
+        # ============================================================
+    # Validar configuração
+    # ============================================================
+
+    $null = Test-EntraConfiguration `
+        -Configuration $Configuration
+
     # ============================================================
     # Validar dados
     # ============================================================
@@ -566,7 +598,7 @@ function New-EntraUserProvision {
         # ========================================================
 
         $Parameters = @{
-            accountEnabled    = $true
+            accountEnabled    = $User.AccountEnabled
             displayName       = $User.DisplayName
             mailNickname      = $User.MailNickname
             userPrincipalName = $User.UserPrincipalName
