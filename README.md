@@ -232,7 +232,7 @@ The project includes automated test scripts for all nine modules.
 |---|---:|
 | 01 - Password Generator | 23 |
 | 02 - Configuration | 17 |
-| 03 - AD User Provisioning | 24 |
+| 03 - AD User Provisioning | 25 |
 | 04 - Entra ID User Provisioning | 29 |
 | 05 - Computer Inventory | 13 |
 | 06 - AD Group Management | 19 |
@@ -241,7 +241,7 @@ The project includes automated test scripts for all nine modules.
 | 09 - Interface | 19 |
 | **Total** | **184** |
 
-All 184 tests passed in the test runs reported during the current review. Module 09 also includes interface validation tests.
+All 184 tests passed in the final test run. Module 09 also includes interface validation tests.
 
 These results reflect automated test scripts executed in the development environment. They do not replace real-environment integration testing, security validation, or acceptance testing.
 
@@ -422,7 +422,9 @@ Individual modules can also be executed directly from their respective directori
 
 ## Current Status
 
-The toolkit currently includes 9 modules and 184 automated tests. All 184 tests passed in the test runs reported during the current review. Final release readiness still depends on completing the remaining documentation, integration, security, and packaging checks.
+The toolkit currently includes 9 modules and 184 automated tests. All 184 tests passed in the final test run. The V1.0.0 release candidate has completed code, automated testing, security, dependency, documentation, configuration, and repository structure checks.
+
+Real-environment integration and acceptance testing remain outside the scope of the automated test suite and should be performed in a controlled environment before production use.
 
 Implemented:
 
