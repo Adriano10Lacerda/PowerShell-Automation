@@ -21,6 +21,9 @@ function Test-ADConfiguration {
     if ($null -eq $Configuration.SimulationMode) {
         $Errors += "O campo 'SimulationMode' não foi configurado."
     }
+    elseif ($Configuration.SimulationMode -isnot [bool]) {
+        $Errors += "O campo 'SimulationMode' deve ser um valor booleano (true ou false)."
+    }
 
     # ========================================
     # Domain

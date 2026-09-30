@@ -7,3 +7,6 @@ __pycache__/
 
 02-Configuration/config.json
 04-Entra-ID-User-Provisioning/Entra-Configuration.json
+
+# Backup files
+*.bak*

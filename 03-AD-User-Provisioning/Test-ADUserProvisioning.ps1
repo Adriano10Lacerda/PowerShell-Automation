@@ -97,6 +97,14 @@ Invoke-Test "SimulationMode está habilitado" {
         throw "SimulationMode deveria estar habilitado."
     }
 }
+Invoke-Test "SimulationMode com tipo inválido é rejeitado" {
+    $InvalidConfiguration = $Configuration.PSObject.Copy()
+    $InvalidConfiguration.SimulationMode = "true"
+
+    Assert-Throws -ExpectedMessage "SimulationMode" -Action {
+        Test-ADConfiguration -Configuration $InvalidConfiguration | Out-Null
+    }
+}
 
 Invoke-Test "Tipos de usuário estão configurados" {
     $UserTypes = @(
