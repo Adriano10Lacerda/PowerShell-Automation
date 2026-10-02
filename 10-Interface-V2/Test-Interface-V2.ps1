@@ -5,8 +5,13 @@
     Testes da Interface Central V2.
 
 .DESCRIPTION
-    Valida a estrutura, funções, integração com Computer Management
-    e arquivos necessários da Interface V2.
+    Valida a estrutura, funções e integrações
+    da Interface V2.
+
+    Integrações atuais:
+    - Computer Management
+    - User Management
+    - User Account Actions
 
 .NOTES
     V2 - Interface Central
@@ -51,6 +56,15 @@ $computerManagementPath = Join-Path `
     $PSScriptRoot `
     "..\Core\Computer\Management\Computer-Management.psm1"
 
+$userManagementPath = Join-Path `
+    $PSScriptRoot `
+    "..\Core\User\Management\User-Management.psm1"
+
+$userActionsPath = Join-Path `
+    $PSScriptRoot `
+    "..\Core\User\Actions\User-Account-Actions.psm1"
+
+
 # ============================================================
 # TESTES DE ARQUIVOS
 # ============================================================
@@ -66,6 +80,15 @@ Write-TestResult `
 Write-TestResult `
     "Computer-Management.psm1 existe" `
     (Test-Path -LiteralPath $computerManagementPath)
+
+Write-TestResult `
+    "User-Management.psm1 existe" `
+    (Test-Path -LiteralPath $userManagementPath)
+
+Write-TestResult `
+    "User-Account-Actions.psm1 existe" `
+    (Test-Path -LiteralPath $userActionsPath)
+
 
 # ============================================================
 # IMPORTAÇÃO
@@ -89,6 +112,7 @@ Write-TestResult `
     "Interface V2 importa sem erro" `
     $moduleImported
 
+
 # ============================================================
 # FUNÇÕES
 # ============================================================
@@ -98,6 +122,10 @@ $expectedFunctions = @(
     "Pause-V2",
     "Show-V2DevelopmentMessage",
     "Start-V2ComputerManagement",
+    "Show-V2UserSummary",
+    "Show-V2UserDetails",
+    "Start-V2UserUnlockAccount",
+    "Start-V2UserManagement",
     "Show-V2MainMenu",
     "Start-V2Interface"
 )
@@ -112,6 +140,7 @@ foreach ($functionName in $expectedFunctions) {
         "Função '$functionName' disponível" `
         ($null -ne $command)
 }
+
 
 # ============================================================
 # CONTEÚDO DO LAUNCHER
@@ -137,6 +166,7 @@ Write-TestResult `
     "Launcher chama Start-V2Interface" `
     ($launcherContent -match "Start-V2Interface")
 
+
 # ============================================================
 # CONTEÚDO DO MÓDULO
 # ============================================================
@@ -152,6 +182,11 @@ try {
 catch {
     $moduleContent = ""
 }
+
+
+# ============================================================
+# MENU PRINCIPAL
+# ============================================================
 
 Write-TestResult `
     "Menu contém Users" `
@@ -185,6 +220,11 @@ Write-TestResult `
     "Menu contém Exit" `
     ($moduleContent -match "Exit")
 
+
+# ============================================================
+# COMPUTER MANAGEMENT
+# ============================================================
+
 Write-TestResult `
     "Computer Management é integrado" `
     ($moduleContent -match "Computer-Management\.psm1")
@@ -198,12 +238,99 @@ Write-TestResult `
     ($moduleContent -match 'Read-Host "  Hostname"')
 
 Write-TestResult `
-    "Modo simulação é apresentado" `
+    "Modo simulação de computador é apresentado" `
     ($moduleContent -match "SimulationMode")
 
 Write-TestResult `
-    "Erros da consulta são tratados" `
+    "Erros da consulta de computador são tratados" `
     ($moduleContent -match "ErrorCount")
+
+
+# ============================================================
+# USER MANAGEMENT
+# ============================================================
+
+Write-TestResult `
+    "User Management é integrado" `
+    ($moduleContent -match "User-Management\.psm1")
+
+Write-TestResult `
+    "Get-UserManagement é utilizado" `
+    ($moduleContent -match "Get-UserManagement")
+
+Write-TestResult `
+    "SamAccountName é solicitado ao operador" `
+    ($moduleContent -match 'Read-Host "  SamAccountName"')
+
+Write-TestResult `
+    "Resumo de usuário é apresentado" `
+    ($moduleContent -match "Show-V2UserSummary")
+
+Write-TestResult `
+    "Detalhes de usuário são apresentados" `
+    ($moduleContent -match "Show-V2UserDetails")
+
+Write-TestResult `
+    "Modo simulação de usuário é apresentado" `
+    ($moduleContent -match "MODO SIMULAÇÃO: ATIVO")
+
+Write-TestResult `
+    "Erros da consulta de usuário são tratados" `
+    ($moduleContent -match "Usuário não encontrado")
+
+
+# ============================================================
+# USER ACCOUNT ACTIONS
+# ============================================================
+
+Write-TestResult `
+    "User Account Actions é integrado" `
+    ($moduleContent -match "User-Account-Actions\.psm1")
+
+Write-TestResult `
+    "Start-V2UserUnlockAccount existe" `
+    ($moduleContent -match "function Start-V2UserUnlockAccount")
+
+Write-TestResult `
+    "Get-UserUnlockPreview é utilizado" `
+    ($moduleContent -match "Get-UserUnlockPreview")
+
+Write-TestResult `
+    "Invoke-UserUnlockAccount é utilizado" `
+    ($moduleContent -match "Invoke-UserUnlockAccount")
+
+Write-TestResult `
+    "Ação de desbloqueio exige confirmação" `
+    ($moduleContent -match 'Confirma a execução\? \[S/N\]')
+
+Write-TestResult `
+    "Execução usa -Execute" `
+    ($moduleContent -match "Invoke-UserUnlockAccount[\s\S]*-Execute")
+
+Write-TestResult `
+    "Modo simulação de desbloqueio é apresentado" `
+    ($moduleContent -match "DESBLOQUEIO SIMULADO COM SUCESSO")
+
+Write-TestResult `
+    "Execução real apresenta resultado" `
+    ($moduleContent -match "CONTA DESBLOQUEADA COM SUCESSO")
+
+Write-TestResult `
+    "Cancelamento da ação é tratado" `
+    ($moduleContent -match "Ação cancelada pelo operador")
+
+Write-TestResult `
+    "Estado LockedOut é apresentado no preview" `
+    ($moduleContent -match "CurrentState")
+
+Write-TestResult `
+    "Estado Unlocked é apresentado no preview" `
+    ($moduleContent -match "TargetState")
+
+Write-TestResult `
+    "Menu do usuário contém desbloqueio" `
+    ($moduleContent -match "2\. Desbloquear conta")
+
 
 # ============================================================
 # RESULTADO
