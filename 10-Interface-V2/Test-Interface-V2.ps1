@@ -12,6 +12,10 @@
     - Computer Management
     - User Management
     - User Account Actions
+        - Unlock
+        - Enable
+        - Disable
+        - Force Password Change
 
 .NOTES
     V2 - Interface Central
@@ -125,6 +129,9 @@ $expectedFunctions = @(
     "Show-V2UserSummary",
     "Show-V2UserDetails",
     "Start-V2UserUnlockAccount",
+    "Start-V2UserEnableAccount",
+    "Start-V2UserDisableAccount",
+    "Start-V2UserForcePasswordChange",
     "Start-V2UserManagement",
     "Show-V2MainMenu",
     "Start-V2Interface"
@@ -280,12 +287,17 @@ Write-TestResult `
 
 
 # ============================================================
-# USER ACCOUNT ACTIONS
+# USER ACCOUNT ACTIONS - INTEGRAÇÃO
 # ============================================================
 
 Write-TestResult `
     "User Account Actions é integrado" `
     ($moduleContent -match "User-Account-Actions\.psm1")
+
+
+# ============================================================
+# UNLOCK
+# ============================================================
 
 Write-TestResult `
     "Start-V2UserUnlockAccount existe" `
@@ -330,6 +342,127 @@ Write-TestResult `
 Write-TestResult `
     "Menu do usuário contém desbloqueio" `
     ($moduleContent -match "2\. Desbloquear conta")
+
+
+# ============================================================
+# ENABLE
+# ============================================================
+
+Write-TestResult `
+    "Start-V2UserEnableAccount existe" `
+    ($moduleContent -match "function Start-V2UserEnableAccount")
+
+Write-TestResult `
+    "Get-UserEnablePreview é utilizado" `
+    ($moduleContent -match "Get-UserEnablePreview")
+
+Write-TestResult `
+    "Invoke-UserEnableAccount é utilizado" `
+    ($moduleContent -match "Invoke-UserEnableAccount")
+
+Write-TestResult `
+    "Mensagem de ativação simulada existe" `
+    ($moduleContent -match "ATIVAÇÃO SIMULADA COM SUCESSO")
+
+Write-TestResult `
+    "Mensagem de ativação real existe" `
+    ($moduleContent -match "CONTA ATIVADA COM SUCESSO")
+
+Write-TestResult `
+    "Menu contém ativação de conta" `
+    ($moduleContent -match "3\. Ativar conta")
+
+
+# ============================================================
+# DISABLE
+# ============================================================
+
+Write-TestResult `
+    "Start-V2UserDisableAccount existe" `
+    ($moduleContent -match "function Start-V2UserDisableAccount")
+
+Write-TestResult `
+    "Get-UserDisablePreview é utilizado" `
+    ($moduleContent -match "Get-UserDisablePreview")
+
+Write-TestResult `
+    "Invoke-UserDisableAccount é utilizado" `
+    ($moduleContent -match "Invoke-UserDisableAccount")
+
+Write-TestResult `
+    "Mensagem de desativação simulada existe" `
+    ($moduleContent -match "DESATIVAÇÃO SIMULADA COM SUCESSO")
+
+Write-TestResult `
+    "Mensagem de desativação real existe" `
+    ($moduleContent -match "CONTA DESATIVADA COM SUCESSO")
+
+Write-TestResult `
+    "Menu contém desativação de conta" `
+    ($moduleContent -match "4\. Desativar conta")
+
+
+# ============================================================
+# FORCE PASSWORD CHANGE
+# ============================================================
+
+Write-TestResult `
+    "Start-V2UserForcePasswordChange existe" `
+    ($moduleContent -match "function Start-V2UserForcePasswordChange")
+
+Write-TestResult `
+    "Get-UserForcePasswordChangePreview é utilizado" `
+    ($moduleContent -match "Get-UserForcePasswordChangePreview")
+
+Write-TestResult `
+    "Invoke-UserForcePasswordChange é utilizado" `
+    ($moduleContent -match "Invoke-UserForcePasswordChange")
+
+Write-TestResult `
+    "Mensagem de troca de senha simulada existe" `
+    ($moduleContent -match "TROCA DE SENHA SIMULADA COM SUCESSO")
+
+Write-TestResult `
+    "Mensagem de troca de senha real existe" `
+    ($moduleContent -match "TROCA DE SENHA OBRIGATÓRIA CONFIGURADA COM SUCESSO")
+
+Write-TestResult `
+    "Menu contém força de troca de senha" `
+    ($moduleContent -match "5\. Forçar troca de senha no próximo logon")
+
+
+# ============================================================
+# MENU DO USUÁRIO
+# ============================================================
+
+Write-TestResult `
+    "Menu contém nova consulta" `
+    ($moduleContent -match "6\. Nova consulta")
+
+Write-TestResult `
+    "Menu do usuário mantém opção Voltar" `
+    ($moduleContent -match "0\. Voltar")
+
+Write-TestResult `
+    "Simulation possui DisabledSamAccountNames" `
+    ($moduleContent -match "DisabledSamAccountNames")
+
+Write-TestResult `
+    "Simulation possui PasswordChangeAtLogonSamAccountNames" `
+    ($moduleContent -match "PasswordChangeAtLogonSamAccountNames")
+
+
+# ============================================================
+# PADRÃO DE SEGURANÇA
+# ============================================================
+
+Write-TestResult `
+    "Interface não contém senha em texto" `
+    ($moduleContent -notmatch '(?i)\bpassword\s*[:=]\s*["''][^"'']+["'']')
+
+Write-TestResult `
+    "Interface não contém Credential em configuração" `
+    ($moduleContent -notmatch '(?i)\bCredential\s*[:=]')
 
 
 # ============================================================

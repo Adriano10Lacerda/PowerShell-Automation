@@ -442,7 +442,10 @@ function Show-V2UserSummary {
     Write-Host ""
     Write-Host "  1. Ver detalhes" -ForegroundColor White
     Write-Host "  2. Desbloquear conta" -ForegroundColor Yellow
-    Write-Host "  3. Nova consulta" -ForegroundColor White
+    Write-Host "  3. Ativar conta" -ForegroundColor Green
+    Write-Host "  4. Desativar conta" -ForegroundColor Red
+    Write-Host "  5. Forçar troca de senha no próximo logon" -ForegroundColor Yellow
+    Write-Host "  6. Nova consulta" -ForegroundColor White
     Write-Host "  0. Voltar" -ForegroundColor Red
     Write-Host ""
 }
@@ -567,7 +570,139 @@ function Show-V2UserDetails {
 
 
 # ============================================================
-# USER ACCOUNT ACTIONS
+# USER ACCOUNT ACTIONS - HELPERS
+# ============================================================
+
+function Show-V2ActionAudit {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$ExecutionResult
+    )
+
+    if ($null -eq $ExecutionResult.Audit) {
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  AUDITORIA" -ForegroundColor DarkCyan
+    Write-Host ""
+
+    $auditRecord = $ExecutionResult.Audit
+
+    Write-Host `
+        "  Ação       : $($auditRecord.Action)" `
+        -ForegroundColor White
+
+    Write-Host `
+        "  Resultado  : $($auditRecord.Result)" `
+        -ForegroundColor White
+
+    Write-Host `
+        "  Simulação  : $($auditRecord.SimulationMode)" `
+        -ForegroundColor White
+
+    Write-Host `
+        "  Alterado   : $($auditRecord.Changed)" `
+        -ForegroundColor White
+
+    Write-Host `
+        "  Operador   : $($auditRecord.Operator)" `
+        -ForegroundColor White
+
+    Write-Host `
+        "  Data/Hora  : $($auditRecord.Timestamp)" `
+        -ForegroundColor White
+}
+
+
+function Show-V2ExecutionResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$ExecutionResult,
+
+        [Parameter(Mandatory)]
+        [string]$SuccessMessage,
+
+        [Parameter(Mandatory)]
+        [string]$SimulationMessage,
+
+        [Parameter(Mandatory)]
+        [string]$NoChangeMessage
+    )
+
+    Write-Host ""
+
+    if (-not $ExecutionResult.Success) {
+
+        Write-Host `
+            "  FALHA NA EXECUÇÃO" `
+            -ForegroundColor Red
+
+        Write-Host ""
+
+        Write-Host `
+            "  $($ExecutionResult.Error)" `
+            -ForegroundColor Yellow
+
+        Pause-V2
+        return $false
+    }
+
+    switch ($ExecutionResult.Status) {
+
+        "Simulated" {
+            Write-Host `
+                "  $SimulationMessage" `
+                -ForegroundColor Yellow
+
+            Write-Host ""
+            Write-Host `
+                "  Nenhuma alteração foi realizada no Active Directory." `
+                -ForegroundColor Yellow
+        }
+
+        "Executed" {
+            Write-Host `
+                "  $SuccessMessage" `
+                -ForegroundColor Green
+
+            Write-Host ""
+            Write-Host `
+                "  Alteração realizada no Active Directory." `
+                -ForegroundColor Green
+        }
+
+        "NoChange" {
+            Write-Host `
+                "  $NoChangeMessage" `
+                -ForegroundColor Yellow
+        }
+
+        default {
+            Write-Host `
+                "  Resultado: $($ExecutionResult.Status)" `
+                -ForegroundColor Yellow
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  RESULTADO DA AÇÃO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Status     : $($ExecutionResult.Status)"
+    Write-Host "  Executado  : $($ExecutionResult.Executed)"
+    Write-Host "  Alterado   : $($ExecutionResult.Changed)"
+
+    Show-V2ActionAudit -ExecutionResult $ExecutionResult
+
+    Pause-V2
+    return $true
+}
+
+
+# ============================================================
+# USER ACCOUNT ACTIONS - UNLOCK
 # ============================================================
 
 function Start-V2UserUnlockAccount {
@@ -668,110 +803,347 @@ function Start-V2UserUnlockAccount {
         -Configuration $Configuration `
         -Execute
 
-    Write-Host ""
+    Show-V2ExecutionResult `
+        -ExecutionResult $executionResult `
+        -SuccessMessage "CONTA DESBLOQUEADA COM SUCESSO" `
+        -SimulationMessage "DESBLOQUEIO SIMULADO COM SUCESSO" `
+        -NoChangeMessage "NENHUMA ALTERAÇÃO NECESSÁRIA"
+}
 
-    if (-not $executionResult.Success) {
+
+# ============================================================
+# USER ACCOUNT ACTIONS - ENABLE
+# ============================================================
+
+function Start-V2UserEnableAccount {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$SamAccountName,
+
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    $actionsPath = Join-Path `
+        $PSScriptRoot `
+        "..\Core\User\Actions\User-Account-Actions.psm1"
+
+    if (-not (Test-Path -LiteralPath $actionsPath)) {
+        throw "User Account Actions não encontrado: $actionsPath"
+    }
+
+    Import-Module `
+        $actionsPath `
+        -Force `
+        -ErrorAction Stop
+
+    Write-V2Header `
+        -Title "ATIVAR CONTA" `
+        -Subtitle "Preview da ação"
+
+    $preview = Get-UserEnablePreview `
+        -SamAccountName $SamAccountName `
+        -Configuration $Configuration
+
+    if (-not $preview.Success) {
 
         Write-Host `
-            "  FALHA NA EXECUÇÃO" `
+            "  Não foi possível gerar o preview." `
             -ForegroundColor Red
 
         Write-Host ""
 
         Write-Host `
-            "  $($executionResult.Error)" `
+            "  $($preview.Error)" `
             -ForegroundColor Yellow
 
         Pause-V2
         return
     }
 
-    switch ($executionResult.Status) {
+    Write-Host "  USUÁRIO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  SamAccountName : $($preview.SamAccountName)"
+    Write-Host ""
 
-        "Simulated" {
-            Write-Host `
-                "  DESBLOQUEIO SIMULADO COM SUCESSO" `
-                -ForegroundColor Yellow
+    Write-Host "  AÇÃO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Descrição      : $($preview.Preview.Description)"
+    Write-Host "  Estado atual   : $($preview.Preview.CurrentState)"
+    Write-Host "  Estado destino : $($preview.Preview.TargetState)"
+    Write-Host ""
 
-            Write-Host ""
-            Write-Host `
-                "  Nenhuma alteração foi realizada no Active Directory." `
-                -ForegroundColor Yellow
-        }
+    if ($preview.SimulationMode) {
+        Write-Host "  MODO SIMULAÇÃO: ATIVO" -ForegroundColor Yellow
+        Write-Host ""
+    }
 
-        "Executed" {
-            Write-Host `
-                "  CONTA DESBLOQUEADA COM SUCESSO" `
-                -ForegroundColor Green
+    if (-not $preview.CanExecute) {
 
-            Write-Host ""
-            Write-Host `
-                "  Alteração realizada no Active Directory." `
-                -ForegroundColor Green
-        }
+        Write-Host `
+            "  Nenhuma alteração necessária." `
+            -ForegroundColor Yellow
 
-        "NoChange" {
-            Write-Host `
-                "  NENHUMA ALTERAÇÃO NECESSÁRIA" `
-                -ForegroundColor Yellow
-        }
+        Pause-V2
+        return
+    }
 
-        default {
-            Write-Host `
-                "  Resultado: $($executionResult.Status)" `
-                -ForegroundColor Yellow
-        }
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $confirmation = Read-Host "  Confirma a execução? [S/N]"
+
+    if ($confirmation.Trim().ToUpperInvariant() -ne "S") {
+
+        Write-Host ""
+        Write-Host `
+            "  Ação cancelada pelo operador." `
+            -ForegroundColor Yellow
+
+        Pause-V2
+        return
     }
 
     Write-Host ""
-    Write-Host "  RESULTADO DA AÇÃO" -ForegroundColor DarkCyan
-    Write-Host ""
-    Write-Host "  Status     : $($executionResult.Status)"
-    Write-Host "  Executado  : $($executionResult.Executed)"
-    Write-Host "  Alterado   : $($executionResult.Changed)"
+    Write-Host "  Executando ação..." -ForegroundColor Cyan
 
-    # --------------------------------------------------------
-    # AUDITORIA
-    # --------------------------------------------------------
+    $executionResult = Invoke-UserEnableAccount `
+        -SamAccountName $SamAccountName `
+        -Configuration $Configuration `
+        -Execute
 
-    if ($null -ne $executionResult.Audit) {
-
-        Write-Host ""
-        Write-Host "  AUDITORIA" -ForegroundColor DarkCyan
-        Write-Host ""
-
-        # O User Account Actions retorna o registro
-        # diretamente como PSCustomObject.
-        $auditRecord = $executionResult.Audit
-
-        Write-Host `
-            "  Ação       : $($auditRecord.Action)" `
-            -ForegroundColor White
-
-        Write-Host `
-            "  Resultado  : $($auditRecord.Result)" `
-            -ForegroundColor White
-
-        Write-Host `
-            "  Simulação  : $($auditRecord.SimulationMode)" `
-            -ForegroundColor White
-
-        Write-Host `
-            "  Alterado   : $($auditRecord.Changed)" `
-            -ForegroundColor White
-
-        Write-Host `
-            "  Operador   : $($auditRecord.Operator)" `
-            -ForegroundColor White
-
-        Write-Host `
-            "  Data/Hora  : $($auditRecord.Timestamp)" `
-            -ForegroundColor White
-    }
-
-    Pause-V2
+    Show-V2ExecutionResult `
+        -ExecutionResult $executionResult `
+        -SuccessMessage "CONTA ATIVADA COM SUCESSO" `
+        -SimulationMessage "ATIVAÇÃO SIMULADA COM SUCESSO" `
+        -NoChangeMessage "A CONTA JÁ ESTÁ ATIVA"
 }
 
+
+# ============================================================
+# USER ACCOUNT ACTIONS - DISABLE
+# ============================================================
+
+function Start-V2UserDisableAccount {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$SamAccountName,
+
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    $actionsPath = Join-Path `
+        $PSScriptRoot `
+        "..\Core\User\Actions\User-Account-Actions.psm1"
+
+    if (-not (Test-Path -LiteralPath $actionsPath)) {
+        throw "User Account Actions não encontrado: $actionsPath"
+    }
+
+    Import-Module `
+        $actionsPath `
+        -Force `
+        -ErrorAction Stop
+
+    Write-V2Header `
+        -Title "DESATIVAR CONTA" `
+        -Subtitle "Preview da ação"
+
+    $preview = Get-UserDisablePreview `
+        -SamAccountName $SamAccountName `
+        -Configuration $Configuration
+
+    if (-not $preview.Success) {
+
+        Write-Host `
+            "  Não foi possível gerar o preview." `
+            -ForegroundColor Red
+
+        Write-Host ""
+
+        Write-Host `
+            "  $($preview.Error)" `
+            -ForegroundColor Yellow
+
+        Pause-V2
+        return
+    }
+
+    Write-Host "  USUÁRIO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  SamAccountName : $($preview.SamAccountName)"
+    Write-Host ""
+
+    Write-Host "  AÇÃO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Descrição      : $($preview.Preview.Description)"
+    Write-Host "  Estado atual   : $($preview.Preview.CurrentState)"
+    Write-Host "  Estado destino : $($preview.Preview.TargetState)"
+    Write-Host ""
+
+    if ($preview.SimulationMode) {
+        Write-Host "  MODO SIMULAÇÃO: ATIVO" -ForegroundColor Yellow
+        Write-Host ""
+    }
+
+    if (-not $preview.CanExecute) {
+
+        Write-Host `
+            "  Nenhuma alteração necessária." `
+            -ForegroundColor Yellow
+
+        Pause-V2
+        return
+    }
+
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $confirmation = Read-Host "  Confirma a execução? [S/N]"
+
+    if ($confirmation.Trim().ToUpperInvariant() -ne "S") {
+
+        Write-Host ""
+        Write-Host `
+            "  Ação cancelada pelo operador." `
+            -ForegroundColor Yellow
+
+        Pause-V2
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  Executando ação..." -ForegroundColor Cyan
+
+    $executionResult = Invoke-UserDisableAccount `
+        -SamAccountName $SamAccountName `
+        -Configuration $Configuration `
+        -Execute
+
+    Show-V2ExecutionResult `
+        -ExecutionResult $executionResult `
+        -SuccessMessage "CONTA DESATIVADA COM SUCESSO" `
+        -SimulationMessage "DESATIVAÇÃO SIMULADA COM SUCESSO" `
+        -NoChangeMessage "A CONTA JÁ ESTÁ DESATIVADA"
+}
+
+
+# ============================================================
+# USER ACCOUNT ACTIONS - FORCE PASSWORD CHANGE
+# ============================================================
+
+function Start-V2UserForcePasswordChange {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$SamAccountName,
+
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    $actionsPath = Join-Path `
+        $PSScriptRoot `
+        "..\Core\User\Actions\User-Account-Actions.psm1"
+
+    if (-not (Test-Path -LiteralPath $actionsPath)) {
+        throw "User Account Actions não encontrado: $actionsPath"
+    }
+
+    Import-Module `
+        $actionsPath `
+        -Force `
+        -ErrorAction Stop
+
+    Write-V2Header `
+        -Title "FORÇAR TROCA DE SENHA" `
+        -Subtitle "Preview da ação"
+
+    $preview = Get-UserForcePasswordChangePreview `
+        -SamAccountName $SamAccountName `
+        -Configuration $Configuration
+
+    if (-not $preview.Success) {
+
+        Write-Host `
+            "  Não foi possível gerar o preview." `
+            -ForegroundColor Red
+
+        Write-Host ""
+
+        Write-Host `
+            "  $($preview.Error)" `
+            -ForegroundColor Yellow
+
+        Pause-V2
+        return
+    }
+
+    Write-Host "  USUÁRIO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  SamAccountName : $($preview.SamAccountName)"
+    Write-Host ""
+
+    Write-Host "  AÇÃO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Descrição      : $($preview.Preview.Description)"
+    Write-Host "  Estado atual   : $($preview.Preview.CurrentState)"
+    Write-Host "  Estado destino : $($preview.Preview.TargetState)"
+    Write-Host ""
+
+    if ($preview.SimulationMode) {
+        Write-Host "  MODO SIMULAÇÃO: ATIVO" -ForegroundColor Yellow
+        Write-Host ""
+    }
+
+    if (-not $preview.CanExecute) {
+
+        Write-Host `
+            "  Nenhuma alteração necessária." `
+            -ForegroundColor Yellow
+
+        Pause-V2
+        return
+    }
+
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $confirmation = Read-Host "  Confirma a execução? [S/N]"
+
+    if ($confirmation.Trim().ToUpperInvariant() -ne "S") {
+
+        Write-Host ""
+        Write-Host `
+            "  Ação cancelada pelo operador." `
+            -ForegroundColor Yellow
+
+        Pause-V2
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  Executando ação..." -ForegroundColor Cyan
+
+    $executionResult = Invoke-UserForcePasswordChange `
+        -SamAccountName $SamAccountName `
+        -Configuration $Configuration `
+        -Execute
+
+    Show-V2ExecutionResult `
+        -ExecutionResult $executionResult `
+        -SuccessMessage "TROCA DE SENHA OBRIGATÓRIA CONFIGURADA COM SUCESSO" `
+        -SimulationMessage "TROCA DE SENHA SIMULADA COM SUCESSO" `
+        -NoChangeMessage "A TROCA DE SENHA JÁ ESTÁ CONFIGURADA"
+}
+
+
+# ============================================================
+# USER MANAGEMENT - LOOP PRINCIPAL
+# ============================================================
 
 function Start-V2UserManagement {
     [CmdletBinding()]
@@ -840,6 +1212,12 @@ function Start-V2UserManagement {
                     LockedSamAccountNames = @(
                         "silva.maria.ext"
                     )
+
+                    DisabledSamAccountNames = @(
+                        "silva.maria3.ext"
+                    )
+
+                    PasswordChangeAtLogonSamAccountNames = @()
                 }
             }
 
@@ -898,6 +1276,24 @@ function Start-V2UserManagement {
                     }
 
                     "3" {
+                        Start-V2UserEnableAccount `
+                            -SamAccountName $samAccountName `
+                            -Configuration $configuration
+                    }
+
+                    "4" {
+                        Start-V2UserDisableAccount `
+                            -SamAccountName $samAccountName `
+                            -Configuration $configuration
+                    }
+
+                    "5" {
+                        Start-V2UserForcePasswordChange `
+                            -SamAccountName $samAccountName `
+                            -Configuration $configuration
+                    }
+
+                    "6" {
                         break
                     }
 
@@ -1056,6 +1452,9 @@ Export-ModuleMember -Function @(
     "Show-V2UserSummary",
     "Show-V2UserDetails",
     "Start-V2UserUnlockAccount",
+    "Start-V2UserEnableAccount",
+    "Start-V2UserDisableAccount",
+    "Start-V2UserForcePasswordChange",
     "Start-V2UserManagement",
     "Show-V2MainMenu",
     "Start-V2Interface"
