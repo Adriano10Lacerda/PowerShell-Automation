@@ -1335,6 +1335,506 @@ function Start-V2UserManagement {
 }
 
 
+
+# ============================================================
+# GROUP MANAGEMENT
+# ============================================================
+
+function Get-V2GroupConfiguration {
+    [CmdletBinding()]
+    param()
+
+    return [PSCustomObject]@{
+        SimulationMode = $true
+
+        ActiveDirectory = [PSCustomObject]@{
+            DomainController = ""
+            TargetOU         = ""
+        }
+
+        Group = [PSCustomObject]@{
+            DefaultScope       = "Global"
+            DefaultCategory    = "Security"
+            RequireDescription = $true
+        }
+
+        Operations = [PSCustomObject]@{
+            CreateGroup = $true
+            AddMember   = $true
+            RemoveMember = $true
+            ListMembers = $true
+        }
+
+        Simulation = [PSCustomObject]@{
+            ExistingGroups = @(
+                [PSCustomObject]@{
+                    Name        = "TI-Suporte"
+                    Description = "Grupo de suporte de TI"
+                    Members     = @("maria.santos")
+                }
+
+                [PSCustomObject]@{
+                    Name        = "TI-Infraestrutura"
+                    Description = "Grupo da equipe de infraestrutura"
+                    Members     = @("carlos.oliveira")
+                }
+
+                [PSCustomObject]@{
+                    Name        = "Administradores"
+                    Description = "Grupo de administradores"
+                    Members     = @("joao.silva")
+                }
+            )
+
+            ExistingUsers = @(
+                "joao.silva"
+                "maria.santos"
+                "carlos.oliveira"
+            )
+        }
+    }
+}
+
+
+function Show-V2GroupSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$GroupResult
+    )
+
+    Write-V2Header `
+        -Title "GROUP MANAGEMENT" `
+        -Subtitle "Consulta do grupo"
+
+    $data = $GroupResult.Data
+
+    Write-Host "  GRUPO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Nome         : $($data.Identity.Name)"
+    Write-Host "  Descrição    : $($data.Identity.Description)"
+    Write-Host "  Escopo       : $($data.Identity.Scope)"
+    Write-Host "  Categoria    : $($data.Identity.Category)"
+    Write-Host ""
+
+    Write-Host "  MEMBROS" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Quantidade   : $(@($data.Members).Count)"
+
+    if ($GroupResult.SimulationMode) {
+        Write-Host ""
+        Write-Host "  MODO SIMULAÇÃO: ATIVO" -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  1. Listar membros" -ForegroundColor White
+    Write-Host "  2. Adicionar membro" -ForegroundColor Green
+    Write-Host "  3. Remover membro" -ForegroundColor Red
+    Write-Host "  4. Nova consulta" -ForegroundColor White
+    Write-Host "  0. Voltar" -ForegroundColor Red
+    Write-Host ""
+}
+
+
+function Show-V2GroupMembers {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$MembersResult
+    )
+
+    Write-V2Header `
+        -Title "GROUP MANAGEMENT" `
+        -Subtitle "Membros do grupo"
+
+    Write-Host "  GRUPO: $($MembersResult.GroupName)" -ForegroundColor DarkCyan
+    Write-Host ""
+
+    if (-not $MembersResult.Success) {
+        Write-Host "  Não foi possível listar os membros." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  $($MembersResult.Error)" -ForegroundColor Yellow
+        Pause-V2
+        return
+    }
+
+    $members = @($MembersResult.Data)
+
+    if ($members.Count -eq 0) {
+        Write-Host "  Nenhum membro encontrado." -ForegroundColor Gray
+    }
+    else {
+        $index = 1
+
+        foreach ($member in $members) {
+            Write-Host `
+                ("  {0,2}. {1}" -f $index, $member.SamAccountName) `
+                -ForegroundColor White
+
+            $index++
+        }
+    }
+
+    if ($MembersResult.SimulationMode) {
+        Write-Host ""
+        Write-Host "  MODO SIMULAÇÃO: ATIVO" -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    Pause-V2
+}
+
+
+function Start-V2GroupAddMember {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$GroupName,
+
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    $member = Read-Host "  SamAccountName do usuário"
+
+    if ([string]::IsNullOrWhiteSpace($member)) {
+        Write-Host ""
+        Write-Host "  SamAccountName não informado." -ForegroundColor Red
+        Pause-V2
+        return
+    }
+
+    $member = $member.Trim()
+
+    Write-V2Header `
+        -Title "ADICIONAR MEMBRO" `
+        -Subtitle "Preview da ação"
+
+    $preview = Get-GroupManagementPreview `
+        -Action "AddMember" `
+        -GroupName $GroupName `
+        -SamAccountName $member `
+        -Configuration $Configuration
+
+    if (-not $preview.Success) {
+        Write-Host "  Não foi possível gerar o preview." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  $($preview.Error)" -ForegroundColor Yellow
+        Pause-V2
+        return
+    }
+
+    $previewData = $preview.Data
+
+    Write-Host "  GRUPO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Grupo          : $($previewData.GroupName)"
+    Write-Host "  Usuário        : $($previewData.SamAccountName)"
+    Write-Host ""
+
+    Write-Host "  AÇÃO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Estado atual   : $($previewData.CurrentState)"
+    Write-Host "  Estado destino : $($previewData.TargetState)"
+    Write-Host ""
+
+    if ($preview.SimulationMode) {
+        Write-Host "  MODO SIMULAÇÃO: ATIVO" -ForegroundColor Yellow
+        Write-Host ""
+    }
+
+    if (-not $previewData.CanExecute) {
+        Write-Host "  Ação não disponível." -ForegroundColor Yellow
+        Pause-V2
+        return
+    }
+
+    $confirmation = Read-Host "  Confirma a execução? [S/N]"
+
+    if ($confirmation.Trim().ToUpperInvariant() -ne "S") {
+        Write-Host ""
+        Write-Host "  Ação cancelada pelo operador." -ForegroundColor Yellow
+        Pause-V2
+        return
+    }
+
+    $result = Invoke-GroupAddMember `
+        -GroupName $GroupName `
+        -SamAccountName $member `
+        -Configuration $Configuration `
+        -Execute
+
+    Write-Host ""
+
+    if ($result.Success) {
+        if ($result.Status -eq "Simulated") {
+            Write-Host "  MEMBRO ADICIONADO EM SIMULAÇÃO." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "  MEMBRO ADICIONADO COM SUCESSO." -ForegroundColor Green
+        }
+
+        if ($null -ne $result.Audit) {
+            Show-V2ActionAudit -ExecutionResult $result
+        }
+    }
+    else {
+        Write-Host "  FALHA AO ADICIONAR MEMBRO." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  $($result.Error)" -ForegroundColor Yellow
+    }
+
+    Pause-V2
+}
+
+function Start-V2GroupRemoveMember {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$GroupName,
+
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration
+    )
+
+    $member = Read-Host "  SamAccountName do usuário"
+
+    if ([string]::IsNullOrWhiteSpace($member)) {
+        Write-Host ""
+        Write-Host "  SamAccountName não informado." -ForegroundColor Red
+        Pause-V2
+        return
+    }
+
+    $member = $member.Trim()
+
+    Write-V2Header `
+        -Title "REMOVER MEMBRO" `
+        -Subtitle "Preview da ação"
+
+    $preview = Get-GroupManagementPreview `
+        -Action "RemoveMember" `
+        -GroupName $GroupName `
+        -SamAccountName $member `
+        -Configuration $Configuration
+
+    if (-not $preview.Success) {
+        Write-Host "  Não foi possível gerar o preview." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  $($preview.Error)" -ForegroundColor Yellow
+        Pause-V2
+        return
+    }
+
+    $previewData = $preview.Data
+
+    Write-Host "  GRUPO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Grupo          : $($previewData.GroupName)"
+    Write-Host "  Usuário        : $($previewData.SamAccountName)"
+    Write-Host ""
+
+    Write-Host "  AÇÃO" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Estado atual   : $($previewData.CurrentState)"
+    Write-Host "  Estado destino : $($previewData.TargetState)"
+    Write-Host ""
+
+    if ($preview.SimulationMode) {
+        Write-Host "  MODO SIMULAÇÃO: ATIVO" -ForegroundColor Yellow
+        Write-Host ""
+    }
+
+    if (-not $previewData.CanExecute) {
+        Write-Host "  Ação não disponível." -ForegroundColor Yellow
+        Pause-V2
+        return
+    }
+
+    $confirmation = Read-Host "  Confirma a execução? [S/N]"
+
+    if ($confirmation.Trim().ToUpperInvariant() -ne "S") {
+        Write-Host ""
+        Write-Host "  Ação cancelada pelo operador." -ForegroundColor Yellow
+        Pause-V2
+        return
+    }
+
+    $result = Invoke-GroupRemoveMember `
+        -GroupName $GroupName `
+        -SamAccountName $member `
+        -Configuration $Configuration `
+        -Execute
+
+    Write-Host ""
+
+    if ($result.Success) {
+        if ($result.Status -eq "Simulated") {
+            Write-Host "  MEMBRO REMOVIDO EM SIMULAÇÃO." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "  MEMBRO REMOVIDO COM SUCESSO." -ForegroundColor Green
+        }
+
+        if ($null -ne $result.Audit) {
+            Show-V2ActionAudit -ExecutionResult $result
+        }
+    }
+    else {
+        Write-Host "  FALHA AO REMOVER MEMBRO." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  $($result.Error)" -ForegroundColor Yellow
+    }
+
+    Pause-V2
+}
+
+function Start-V2GroupManagement {
+    [CmdletBinding()]
+    param()
+
+    $managementPath = Join-Path `
+        $PSScriptRoot `
+        "..\Core\Group\Management\Group-Management.psm1"
+
+    if (-not (Test-Path -LiteralPath $managementPath)) {
+        throw "Group Management não encontrado: $managementPath"
+    }
+
+    Import-Module `
+        $managementPath `
+        -Force `
+        -ErrorAction Stop
+
+    $configuration = Get-V2GroupConfiguration
+
+    do {
+
+        Write-V2Header `
+            -Title "GROUP MANAGEMENT" `
+            -Subtitle "Consulta e administração de grupos do Active Directory"
+
+        Write-Host "  Digite o nome do grupo." -ForegroundColor Gray
+        Write-Host ""
+
+        $groupName = Read-Host "  Grupo"
+
+        if ([string]::IsNullOrWhiteSpace($groupName)) {
+            Write-Host ""
+            Write-Host "  Grupo não informado." -ForegroundColor Red
+            Pause-V2
+            return
+        }
+
+        $groupName = $groupName.Trim()
+
+        try {
+
+            $groupResult = Get-GroupManagement `
+                -GroupName $groupName `
+                -Configuration $configuration
+
+            if (-not $groupResult.Success) {
+                Write-V2Header `
+                    -Title "GROUP MANAGEMENT" `
+                    -Subtitle "Resultado da consulta"
+
+                Write-Host `
+                    "  Grupo não encontrado ou consulta não concluída." `
+                    -ForegroundColor Red
+
+                Write-Host ""
+
+                Write-Host `
+                    "  $($groupResult.Error)" `
+                    -ForegroundColor Yellow
+
+                Pause-V2
+                continue
+            }
+
+            do {
+
+                Show-V2GroupSummary `
+                    -GroupResult $groupResult
+
+                $option = Read-Host "  Selecione uma opção"
+
+                switch ($option) {
+
+                    "1" {
+                        $membersResult = Get-GroupManagementMembers `
+                            -GroupName $groupName `
+                            -Configuration $configuration
+
+                        Show-V2GroupMembers `
+                            -MembersResult $membersResult
+                    }
+
+                    "2" {
+                        Start-V2GroupAddMember `
+                            -GroupName $groupName `
+                            -Configuration $configuration
+
+                        $groupResult = Get-GroupManagement `
+                            -GroupName $groupName `
+                            -Configuration $configuration
+                    }
+
+                    "3" {
+                        Start-V2GroupRemoveMember `
+                            -GroupName $groupName `
+                            -Configuration $configuration
+
+                        $groupResult = Get-GroupManagement `
+                            -GroupName $groupName `
+                            -Configuration $configuration
+                    }
+
+                    "4" {
+                        break
+                    }
+
+                    "0" {
+                        return
+                    }
+
+                    default {
+                        Write-Host ""
+                        Write-Host "  Opção inválida." -ForegroundColor Red
+                        Start-Sleep -Seconds 1
+                    }
+                }
+
+            } while ($true)
+
+        }
+        catch {
+
+            Write-V2Header `
+                -Title "GROUP MANAGEMENT" `
+                -Subtitle "Erro"
+
+            Write-Host `
+                "  Erro ao consultar grupo:" `
+                -ForegroundColor Red
+
+            Write-Host ""
+
+            Write-Host `
+                "  $($_.Exception.Message)" `
+                -ForegroundColor Red
+
+            Pause-V2
+            return
+        }
+
+    } while ($true)
+}
+
+
 # ============================================================
 # MENU PRINCIPAL
 # ============================================================
@@ -1382,8 +1882,7 @@ function Start-V2Interface {
             }
 
             "3" {
-                Show-V2DevelopmentMessage `
-                    -ModuleName "GROUPS"
+                Start-V2GroupManagement
             }
 
             "4" {
@@ -1456,6 +1955,15 @@ Export-ModuleMember -Function @(
     "Start-V2UserDisableAccount",
     "Start-V2UserForcePasswordChange",
     "Start-V2UserManagement",
+    "Get-V2GroupConfiguration",
+    "Show-V2GroupSummary",
+    "Show-V2GroupMembers",
+    "Start-V2GroupAddMember",
+    "Start-V2GroupRemoveMember",
+    "Start-V2GroupManagement",
     "Show-V2MainMenu",
     "Start-V2Interface"
 )
+
+
+
