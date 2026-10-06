@@ -1412,9 +1412,9 @@ function Show-V2GroupSummary {
     Write-Host "  GRUPO" -ForegroundColor DarkCyan
     Write-Host ""
     Write-Host "  Nome         : $($data.Identity.Name)"
-    Write-Host "  Descrição    : $($data.Identity.Description)"
-    Write-Host "  Escopo       : $($data.Identity.Scope)"
-    Write-Host "  Categoria    : $($data.Identity.Category)"
+    Write-Host "  Descrição    : $($data.Description)"
+    Write-Host "  Escopo       : $($data.Identity.GroupScope)"
+    Write-Host "  Categoria    : $($data.Identity.GroupCategory)"
     Write-Host ""
 
     Write-Host "  MEMBROS" -ForegroundColor DarkCyan
@@ -1441,15 +1441,18 @@ function Show-V2GroupSummary {
 function Show-V2GroupMembers {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [PSCustomObject]$MembersResult
+         [Parameter(Mandatory)]
+         [PSCustomObject]$MembersResult,
+
+         [Parameter(Mandatory)]
+         [string]$GroupName
     )
 
     Write-V2Header `
         -Title "GROUP MANAGEMENT" `
         -Subtitle "Membros do grupo"
 
-    Write-Host "  GRUPO: $($MembersResult.GroupName)" -ForegroundColor DarkCyan
+    Write-Host "  GRUPO: $GroupName" -ForegroundColor DarkCyan
     Write-Host ""
 
     if (-not $MembersResult.Success) {
@@ -1755,6 +1758,8 @@ function Start-V2GroupManagement {
                 continue
             }
 
+$newQuery = $false
+
             do {
 
                 Show-V2GroupSummary `
@@ -1770,7 +1775,8 @@ function Start-V2GroupManagement {
                             -Configuration $configuration
 
                         Show-V2GroupMembers `
-                            -MembersResult $membersResult
+                            -MembersResult $membersResult `
+                            -GroupName $groupName
                     }
 
                     "2" {
@@ -1794,7 +1800,7 @@ function Start-V2GroupManagement {
                     }
 
                     "4" {
-                        break
+                        $newQuery = $true
                     }
 
                     "0" {
@@ -1808,7 +1814,7 @@ function Start-V2GroupManagement {
                     }
                 }
 
-            } while ($true)
+            } while (-not $newQuery)
 
         }
         catch {
