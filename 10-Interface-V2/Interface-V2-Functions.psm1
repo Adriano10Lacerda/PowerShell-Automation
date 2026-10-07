@@ -1713,7 +1713,7 @@ function Start-V2GroupManagement {
 
     $configuration = Get-V2GroupConfiguration
 
-    do {
+    :GroupQueryLoop do {
 
         Write-V2Header `
             -Title "GROUP MANAGEMENT" `
@@ -1758,7 +1758,6 @@ function Start-V2GroupManagement {
                 continue
             }
 
-$newQuery = $false
 
             do {
 
@@ -1800,7 +1799,7 @@ $newQuery = $false
                     }
 
                     "4" {
-                        $newQuery = $true
+                        continue GroupQueryLoop
                     }
 
                     "0" {
@@ -1814,7 +1813,7 @@ $newQuery = $false
                     }
                 }
 
-            } while (-not $newQuery)
+            } while ($true)
 
         }
         catch {
