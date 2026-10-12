@@ -453,6 +453,50 @@ Write-TestResult `
 
 
 # ============================================================
+# POLICIES - GPO MANAGEMENT
+# ============================================================
+
+Write-TestResult `
+    "Start-V2PolicyManagement existe" `
+    ($moduleContent -match 'function Start-V2PolicyManagement')
+
+Write-TestResult `
+    "Policies importa o módulo GPO" `
+    ($moduleContent -match '07-GPO-Management.*GPO-Functions\.psm1')
+
+Write-TestResult `
+    "Policies carrega a configuração GPO" `
+    ($moduleContent -match 'GPO-Configuration\.json')
+
+Write-TestResult `
+    "Policies bloqueia operação sem SimulationMode" `
+    ($moduleContent -match 'SimulationMode -ne \$true')
+
+Write-TestResult `
+    "Policies oferece listagem de GPOs" `
+    ($moduleContent -match '"ListGPOs"')
+
+Write-TestResult `
+    "Policies oferece consulta de GPO" `
+    ($moduleContent -match '"CheckGPO"')
+
+Write-TestResult `
+    "Policies oferece consulta de vínculos" `
+    ($moduleContent -match '"ListLinks"')
+
+Write-TestResult `
+    "Policies oferece criação simulada" `
+    ($moduleContent -match '"CreateGPO"')
+
+Write-TestResult `
+    "Opção 5 chama Start-V2PolicyManagement" `
+    ($moduleContent -match '"5"\s*\{\s*Start-V2PolicyManagement')
+
+Write-TestResult `
+    "Start-V2PolicyManagement está exportada" `
+    ($moduleContent -match '"Start-V2PolicyManagement",')
+
+# ============================================================
 # PADRÃO DE SEGURANÇA
 # ============================================================
 

@@ -1844,6 +1844,164 @@ function Start-V2GroupManagement {
 # MENU PRINCIPAL
 # ============================================================
 
+
+# ============================================================
+# POLICIES - GROUP POLICY MANAGEMENT
+# ============================================================
+
+function Start-V2PolicyManagement {
+    [CmdletBinding()]
+    param()
+
+    $gpoPath = Join-Path $PSScriptRoot "..\07-GPO-Management\GPO-Functions.psm1"
+    $configPath = Join-Path $PSScriptRoot "..\07-GPO-Management\GPO-Configuration.json"
+
+    if (-not (Test-Path -LiteralPath $gpoPath)) {
+        throw "Módulo GPO não encontrado: $gpoPath"
+    }
+
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        throw "Configuração GPO não encontrada: $configPath"
+    }
+
+    $configuration = Get-Content -LiteralPath $configPath -Raw |
+        ConvertFrom-Json
+
+    if ($configuration.SimulationMode -ne $true) {
+        Write-V2Header -Title "POLICIES" -Subtitle "Gerenciamento de Group Policy Objects"
+        Write-Host "Operação bloqueada: SimulationMode não está ativo." -ForegroundColor Red
+        Write-Host "Nenhuma operação foi executada." -ForegroundColor Yellow
+        Pause-V2
+        return
+    }
+
+    Import-Module $gpoPath -Force -ErrorAction Stop
+
+    $gpoModule = Get-Module |
+        Where-Object {
+            $_.Path -and
+            ([System.IO.Path]::GetFullPath($_.Path) -eq
+             [System.IO.Path]::GetFullPath((Resolve-Path $gpoPath).Path))
+        } |
+        Select-Object -First 1
+
+    if ($null -eq $gpoModule) {
+        throw "Não foi possível carregar o módulo GPO."
+    }
+
+    do {
+        Write-V2Header -Title "POLICIES" -Subtitle "Gerenciamento de Group Policy Objects"
+        Write-Host "  1. Listar GPOs" -ForegroundColor Green
+        Write-Host "  2. Consultar GPO" -ForegroundColor White
+        Write-Host "  3. Consultar vínculos" -ForegroundColor White
+        Write-Host "  4. Simular criação de GPO" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Modo de simulação: ATIVO" -ForegroundColor Yellow
+        Write-Host "  0. Voltar" -ForegroundColor Red
+
+        $option = Read-Host "  Selecione uma opção"
+        $operation = $null
+        $gpoName = $null
+        $description = $null
+
+        switch ($option) {
+            "1" {
+                $operation = "ListGPOs"
+            }
+            "2" {
+                $gpoName = (Read-Host "  Nome da GPO").Trim()
+                if ([string]::IsNullOrWhiteSpace($gpoName)) {
+                    Write-Host "Nome da GPO obrigatório." -ForegroundColor Red
+                    Pause-V2
+                    continue
+                }
+                $operation = "CheckGPO"
+            }
+            "3" {
+                $gpoName = (Read-Host "  Nome da GPO").Trim()
+                if ([string]::IsNullOrWhiteSpace($gpoName)) {
+                    Write-Host "Nome da GPO obrigatório." -ForegroundColor Red
+                    Pause-V2
+                    continue
+                }
+                $operation = "ListLinks"
+            }
+            "4" {
+                $gpoName = (Read-Host "  Nome da nova GPO").Trim()
+                if ([string]::IsNullOrWhiteSpace($gpoName)) {
+                    Write-Host "Nome da GPO obrigatório." -ForegroundColor Red
+                    Pause-V2
+                    continue
+                }
+
+                $description = (Read-Host "  Descrição da GPO").Trim()
+                if (
+                    $configuration.GPO.RequireDescription -eq $true -and
+                    [string]::IsNullOrWhiteSpace($description)
+                ) {
+                    Write-Host "A descrição é obrigatória." -ForegroundColor Red
+                    Pause-V2
+                    continue
+                }
+
+                Write-Host "A criação será somente simulada." -ForegroundColor Yellow
+                $confirmation = Read-Host "Confirmar simulação? (S/N)"
+                if ($confirmation -notmatch '^(S|SIM)$') {
+                    Write-Host "Operação cancelada." -ForegroundColor Yellow
+                    Pause-V2
+                    continue
+                }
+
+                $operation = "CreateGPO"
+            }
+            "0" {
+                break
+            }
+            default {
+                Write-Host "Opção inválida." -ForegroundColor Red
+                Pause-V2
+                continue
+            }
+        }
+
+        if ($operation) {
+            try {
+                $invokeCommand = "{0}\Invoke-GPOManagement" -f $gpoModule.Name
+                $parameters = @{
+                    Operation     = $operation
+                    Configuration = $configuration
+                    ErrorAction   = "Stop"
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($gpoName)) {
+                    $parameters.GPOName = $gpoName
+                }
+
+                if ($null -ne $description) {
+                    $parameters.Description = $description
+                }
+
+                $result = & $invokeCommand @parameters
+
+                Write-Host ""
+                Write-Host "Operação: $operation" -ForegroundColor Cyan
+                Write-Host "SimulationMode: ATIVO" -ForegroundColor Yellow
+                if ($null -ne $result) {
+                    $result | Format-List * | Out-Host
+                }
+                else {
+                    Write-Host "A operação não retornou dados." -ForegroundColor Yellow
+                }
+            }
+            catch {
+                Write-Host "Falha na operação: $($_.Exception.Message)" -ForegroundColor Red
+            }
+
+            Pause-V2
+        }
+
+    } while ($option -ne "0")
+}
 function Show-V2MainMenu {
     [CmdletBinding()]
     param()
@@ -1902,8 +2060,7 @@ function Start-V2Interface {
             }
 
             "5" {
-                Show-V2DevelopmentMessage `
-                    -ModuleName "POLICIES"
+                Start-V2PolicyManagement
             }
 
             "6" {
@@ -1966,6 +2123,7 @@ Export-ModuleMember -Function @(
     "Start-V2GroupAddMember",
     "Start-V2GroupRemoveMember",
     "Start-V2GroupManagement",
+    "Start-V2PolicyManagement",
     "Show-V2MainMenu",
     "Start-V2Interface"
 )
