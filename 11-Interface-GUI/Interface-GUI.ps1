@@ -208,6 +208,21 @@ Add-Type -AssemblyName WindowsBase
            TextWrapping="Wrap" Margin="0,7,0,10"/>
 
 <WrapPanel Margin="0,0,0,10">
+    <Button x:Name="btnADValidate" Content="Validar configuração AD"
+            Padding="10,7" Margin="0,0,8,6"/>
+    <Button x:Name="btnADConnectivity" Content="Testar conectividade AD"
+            Padding="10,7" Margin="0,0,8,6"/>
+</WrapPanel>
+<WrapPanel Margin="0,0,0,10">
+    <TextBlock Text="Login do usuário (sAMAccountName):" VerticalAlignment="Center"
+               Margin="0,0,8,6" Foreground="#344563"/>
+    <TextBox x:Name="txtADSamAccountName" Width="190"
+             Padding="7,5" Margin="0,0,8,6"
+             Text="silva.maria.ext"/>
+    <Button x:Name="btnADUserExists" Content="Consultar usuário"
+            Padding="10,7" Margin="0,0,8,6"/>
+</WrapPanel>
+<WrapPanel Margin="0,0,0,10">
     <Button x:Name="btnGPOList" Content="Listar GPOs"
             Padding="10,7" Margin="0,0,8,6"/>
     <Button x:Name="btnGPOCheck" Content="Consultar GPO"
@@ -265,11 +280,74 @@ $showModuleMessage = {
     $statusText.Text = "Módulo selecionado: $moduleName. Integração funcional ainda não habilitada; nenhuma operação foi executada."
 }
 
+# Integração AD: consultas permitidas somente em modo de simulação.
+$script:GuiADConfigPath = Join-Path (Split-Path $PSScriptRoot -Parent) "03-AD-User-Provisioning\AD-Configuration.json"
+$script:GuiADModulePath = Join-Path (Split-Path $PSScriptRoot -Parent) "03-AD-User-Provisioning\AD-Functions.psm1"
+$script:GuiADConfig = Get-Content $script:GuiADConfigPath -Raw | ConvertFrom-Json
+
+if ($script:GuiADConfig.SimulationMode -ne $true) {
+    throw "A interface GUI exige SimulationMode = true para operações AD."
+}
+
+Import-Module $script:GuiADModulePath -Force
+
+function Invoke-GuiADAction {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("Validar", "Conectividade", "ConsultarUsuario")]
+        [string]$Acao
+    )
+
+    $output = $window.FindName("OutputText")
+    $status = $window.FindName("StatusText")
+
+    try {
+        if ($script:GuiADConfig.SimulationMode -ne $true) {
+            throw "Modo de simulação desativado. Operação cancelada."
+        }
+
+        switch ($Acao) {
+            "Validar" {
+                $resultado = Test-ADConfiguration -Configuration $script:GuiADConfig
+                $texto = "Validação da configuração AD:`r`n" +
+                    ($resultado | Format-List | Out-String -Width 120)
+                $status.Text = "Validação da configuração AD concluída."
+            }
+            "Conectividade" {
+                $resultado = Test-ADConnectivity -Configuration $script:GuiADConfig
+                $texto = "Teste de conectividade AD (simulação):`r`n" +
+                    ($resultado | Format-List | Out-String -Width 120)
+                $status.Text = "Teste concluído em modo de simulação; nenhuma conexão real foi realizada."
+            }
+            "ConsultarUsuario" {
+                $sam = $window.FindName("txtADSamAccountName").Text.Trim()
+
+                if ([string]::IsNullOrWhiteSpace($sam)) {
+                    throw "Informe um sAMAccountName para consultar."
+                }
+
+                $resultado = Test-ADUserExists `
+                    -SamAccountName $sam `
+                    -Configuration $script:GuiADConfig
+
+                $texto = "Consulta simulada do usuário: $sam`r`n" +
+                    ($resultado | Format-List | Out-String -Width 120)
+                $status.Text = "Consulta de usuário simulada concluída."
+            }
+        }
+
+        $output.Text = $texto.Trim()
+    }
+    catch {
+        $status.Text = "Falha na operação AD."
+        $output.Text = $_.Exception.Message
+    }
+}
 $window.FindName("btnHome").Add_Click({
     $statusText.Text = "Visão geral. Interface carregada em modo visual."
 })
-$window.FindName("btnAD").Add_Click({ & $showModuleMessage "Active Directory" })
-$window.FindName("cardAD").Add_Click({ & $showModuleMessage "Active Directory" })
+$window.FindName("btnAD").Add_Click({ Invoke-GuiADAction -Acao "Validar" })
+$window.FindName("cardAD").Add_Click({ Invoke-GuiADAction -Acao "Validar" })
 $window.FindName("btnEntra").Add_Click({ & $showModuleMessage "Microsoft Entra ID" })
 $window.FindName("cardEntra").Add_Click({ & $showModuleMessage "Microsoft Entra ID" })
 # Ações GPO: todas as consultas usam a configuração em modo de simulação.
@@ -335,6 +413,15 @@ $window.FindName("btnGPO").Add_Click({
 })
 $window.FindName("cardGPO").Add_Click({
     Invoke-GuiGpoAction -Acao "Listar"
+})
+$window.FindName("btnADValidate").Add_Click({
+    Invoke-GuiADAction -Acao "Validar"
+})
+$window.FindName("btnADConnectivity").Add_Click({
+    Invoke-GuiADAction -Acao "Conectividade"
+})
+$window.FindName("btnADUserExists").Add_Click({
+    Invoke-GuiADAction -Acao "ConsultarUsuario"
 })
 $window.FindName("btnGPOList").Add_Click({
     Invoke-GuiGpoAction -Acao "Listar"
