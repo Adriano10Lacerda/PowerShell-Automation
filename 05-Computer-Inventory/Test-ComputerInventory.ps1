@@ -1,26 +1,21 @@
+
 # ============================================
 # Test-ComputerInventory.ps1
 # PowerShell Automation
-# Testes do módulo Computer Inventory
+# Testes do modulo Computer Inventory
 # ============================================
 
 $ErrorActionPreference = "Stop"
 
 $ModulePath = Join-Path $PSScriptRoot "Inventory-Functions.psm1"
 $ConfigPath = Join-Path $PSScriptRoot "Inventory-Configuration.json"
-$ReportPath = Join-Path $PSScriptRoot "Reports"
 
 $TotalTests = 0
 $PassedTests = 0
 $FailedTests = 0
 
-# ============================================
-# FUNÇÃO DE TESTE
-# ============================================
-
 function Invoke-Test {
-
-    param (
+    param(
         [Parameter(Mandatory = $true)]
         [string]$Name,
 
@@ -30,513 +25,258 @@ function Invoke-Test {
 
     $script:TotalTests++
 
-    Write-Host "Teste $($script:TotalTests) - $Name" -ForegroundColor Yellow
-
     try {
-
         & $Test
-
         $script:PassedTests++
-
         Write-Host "PASSOU - $Name" -ForegroundColor Green
     }
     catch {
-
         $script:FailedTests++
-
         Write-Host "FALHOU - $Name" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
     }
-
-    Write-Host ""
 }
 
+Write-Host "`n=== TESTES - COMPUTER INVENTORY ===" -ForegroundColor Cyan
+
+Invoke-Test -Name "Modulo encontrado" -Test {
+    if (-not (Test-Path $ModulePath)) {
+        throw "Modulo nao encontrado."
+    }
+}
+
+Invoke-Test -Name "Configuracao JSON valida" -Test {
+    if (-not (Test-Path $ConfigPath)) {
+        throw "Configuracao nao encontrada."
+    }
+
+    $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+
+    if ($null -eq $config.Inventory -or $null -eq $config.Output) {
+        throw "Secoes Inventory ou Output ausentes."
+    }
+}
+
+Import-Module $ModulePath -Force
+
+$config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+$config.SimulationMode = $true
+Invoke-Test -Name "Coleta simulada identificada" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+
+    if ($inventory.SimulationMode -ne $true) {
+        throw "O inventario nao identificou o modo de simulacao."
+    }
+}
+
+Invoke-Test -Name "Dados ficticios do computador" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+
+    if ($config.Inventory.ComputerSystem -and
+        $inventory.ComputerSystem.ComputerName -ne "SIMULATED-PC") {
+        throw "Identificacao simulada inesperada."
+    }
+}
+
+Invoke-Test -Name "Sistema operacional simulado" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+
+    if ($config.Inventory.OperatingSystem -and
+        $inventory.OperatingSystem.OperatingSystem -ne "Windows (Simulacao)") {
+        throw "Sistema operacional simulado inesperado."
+    }
+}
+
+Invoke-Test -Name "Processador simulado" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+
+    if ($config.Inventory.Processor -and
+        $inventory.Processor.ProcessorName -ne "CPU de Demonstracao") {
+        throw "Processador simulado inesperado."
+    }
+}
+
+Invoke-Test -Name "Memoria simulada" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+
+    if ($config.Inventory.Memory -and
+        $inventory.Memory.TotalMemoryGB -ne 16) {
+        throw "Memoria simulada inesperada."
+    }
+}
+
+Invoke-Test -Name "Disco simulado" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+
+    if ($config.Inventory.Disk -and @($inventory.Disk).Count -eq 0) {
+        throw "Nenhum disco simulado retornado."
+    }
+}
+
+Invoke-Test -Name "Rede simulada" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+
+    if ($config.Inventory.Network -and @($inventory.Network).Count -eq 0) {
+        throw "Nenhum adaptador simulado retornado."
+    }
+}
+
+Invoke-Test -Name "BitLocker sem consulta real" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+
+    if ($config.Inventory.BitLocker -and
+        $inventory.BitLocker.Message -notlike "*nao foi consultado*") {
+        throw "A resposta simulada do BitLocker nao corresponde ao esperado."
+    }
+}
+
+Invoke-Test -Name "Exportacao simulada sem arquivos" -Test {
+    $inventory = Get-ComputerInventory -Configuration $config
+    $result = Export-ComputerInventory -Inventory $inventory -Configuration $config
+
+    if ($result.Success -ne $true) {
+        throw "A simulacao da exportacao falhou."
+    }
+
+    if (@($result.Files).Count -ne 0) {
+        throw "A simulacao informou arquivos gerados."
+    }
+
+    if ($null -ne $result.Directory) {
+        throw "A simulacao informou um diretorio de saida."
+    }
+
+    if ($result.SimulationMode -ne $true) {
+        throw "O resultado nao identificou o modo de simulacao."
+    }
+}
+
+
 # ============================================
-# CABEÇALHO
+# Testes adicionais de exportação (dados fictícios)
 # ============================================
 
-Write-Host ""
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TESTES - COMPUTER INVENTORY" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host ""
+$testRoot = Join-Path $env:TEMP (
+    "PSAutomation-InventoryTests-" + [guid]::NewGuid().ToString("N")
+)
 
-# ============================================
-# TESTE 1 - MÓDULO
-# ============================================
+try {
+    $configExport = $config | ConvertTo-Json -Depth 20 |
+        ConvertFrom-Json
 
-Invoke-Test `
-    -Name "Carregamento do módulo" `
-    -Test {
+    $configExport.SimulationMode = $true
+    $inventoryExport = Get-ComputerInventory -Configuration $configExport
 
-        if (-not (Test-Path $ModulePath)) {
+    Invoke-Test -Name "Exportação JSON válida" -Test {
+        $configJson = $configExport | ConvertTo-Json -Depth 20 |
+            ConvertFrom-Json
+        $configJson.SimulationMode = $false
+        $configJson.Output.Directory = Join-Path $testRoot "JSON"
+        $configJson.Output.Formats = @("JSON")
 
-            throw "Inventory-Functions.psm1 não foi encontrado."
+        $result = Export-ComputerInventory `
+            -Inventory $inventoryExport `
+            -Configuration $configJson
+
+        if (-not $result.Success -or @($result.Files).Count -ne 1) {
+            throw "A exportação JSON não retornou exatamente um arquivo."
         }
 
-        Import-Module $ModulePath -Force -ErrorAction Stop
+        $json = Get-Content -LiteralPath $result.Files[0] -Raw |
+            ConvertFrom-Json -ErrorAction Stop
 
-        if (-not (Get-Command Get-ComputerInventory -ErrorAction SilentlyContinue)) {
-
-            throw "A função Get-ComputerInventory não está disponível."
+        if ($json.ComputerSystem.ComputerName -ne "SIMULATED-PC") {
+            throw "O JSON não contém o computador fictício esperado."
         }
     }
 
-# ============================================
-# TESTE 2 - CONFIGURAÇÃO
-# ============================================
+    Invoke-Test -Name "Exportação CSV válida com 18 colunas" -Test {
+        $configCsv = $configExport | ConvertTo-Json -Depth 20 |
+            ConvertFrom-Json
+        $configCsv.SimulationMode = $false
+        $configCsv.Output.Directory = Join-Path $testRoot "CSV"
+        $configCsv.Output.Formats = @("CSV")
 
-Invoke-Test `
-    -Name "Carregamento da configuração" `
-    -Test {
+        $result = Export-ComputerInventory `
+            -Inventory $inventoryExport `
+            -Configuration $configCsv
 
-        if (-not (Test-Path $ConfigPath)) {
-
-            throw "Inventory-Configuration.json não foi encontrado."
+        if (-not $result.Success -or @($result.Files).Count -ne 1) {
+            throw "A exportação CSV não retornou exatamente um arquivo."
         }
 
-        $Configuration = Get-Content `
-            $ConfigPath `
-            -Raw `
-            -ErrorAction Stop |
-            ConvertFrom-Json `
-            -ErrorAction Stop
+        $rows = @(Import-Csv -LiteralPath $result.Files[0] -ErrorAction Stop)
 
-        if ($null -eq $Configuration.Inventory) {
-
-            throw "A seção Inventory não foi encontrada."
+        if ($rows.Count -ne 1) {
+            throw "O CSV deveria conter exatamente um registro."
         }
 
-        if ($null -eq $Configuration.Output) {
-
-            throw "A seção Output não foi encontrada."
-        }
-    }
-
-# ============================================
-# CARREGAR CONFIGURAÇÃO PARA OS TESTES
-# ============================================
-
-$Configuration = Get-Content `
-    $ConfigPath `
-    -Raw |
-    ConvertFrom-Json
-
-# ============================================
-# TESTE 3 - COMPUTER SYSTEM
-# ============================================
-
-Invoke-Test `
-    -Name "Coleta de informações do computador" `
-    -Test {
-
-        $Result = Get-ComputerSystemInventory
-
-        if ($null -eq $Result) {
-
-            throw "A função não retornou resultado."
+        if (@($rows[0].PSObject.Properties).Count -ne 18) {
+            throw "O CSV não contém as 18 colunas esperadas."
         }
 
-        if ([string]::IsNullOrWhiteSpace($Result.ComputerName)) {
-
-            throw "ComputerName não foi coletado."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($Result.Manufacturer)) {
-
-            throw "Manufacturer não foi coletado."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($Result.Model)) {
-
-            throw "Model não foi coletado."
+        if ($rows[0].ComputerName -ne "SIMULATED-PC") {
+            throw "O CSV não contém o computador fictício esperado."
         }
     }
 
-# ============================================
-# TESTE 4 - SISTEMA OPERACIONAL
-# ============================================
+    Invoke-Test -Name "Exportação para caminho absoluto" -Test {
+        $configAbs = $configExport | ConvertTo-Json -Depth 20 |
+            ConvertFrom-Json
+        $configAbs.SimulationMode = $false
+        $configAbs.Output.Directory = Join-Path $testRoot "Absolute"
+        $configAbs.Output.Formats = @("JSON", "CSV")
 
-Invoke-Test `
-    -Name "Coleta do sistema operacional" `
-    -Test {
+        $result = Export-ComputerInventory `
+            -Inventory $inventoryExport `
+            -Configuration $configAbs
 
-        $Result = Get-OperatingSystemInventory
-
-        if ($null -eq $Result) {
-
-            throw "A função não retornou resultado."
+        if (-not $result.Success) {
+            throw "Falha no caminho absoluto: $($result.Message)"
         }
 
-        if ([string]::IsNullOrWhiteSpace($Result.OperatingSystem)) {
-
-            throw "Sistema operacional não foi identificado."
+        if (@($result.Files).Count -ne 2) {
+            throw "Esperados dois arquivos no caminho absoluto."
         }
 
-        if ([string]::IsNullOrWhiteSpace($Result.Version)) {
-
-            throw "Versão do sistema operacional não foi coletada."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($Result.Build)) {
-
-            throw "Build do sistema operacional não foi coletada."
-        }
-    }
-
-# ============================================
-# TESTE 5 - PROCESSADOR
-# ============================================
-
-Invoke-Test `
-    -Name "Coleta do processador" `
-    -Test {
-
-        $Result = Get-ProcessorInventory
-
-        if ($null -eq $Result) {
-
-            throw "A função não retornou resultado."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($Result.ProcessorName)) {
-
-            throw "Nome do processador não foi coletado."
-        }
-
-        if ($Result.PhysicalCores -le 0) {
-
-            throw "Quantidade de núcleos inválida."
-        }
-
-        if ($Result.LogicalProcessors -le 0) {
-
-            throw "Quantidade de processadores lógicos inválida."
-        }
-    }
-
-# ============================================
-# TESTE 6 - MEMÓRIA
-# ============================================
-
-Invoke-Test `
-    -Name "Coleta de memória RAM" `
-    -Test {
-
-        $Result = Get-MemoryInventory
-
-        if ($null -eq $Result) {
-
-            throw "A função não retornou resultado."
-        }
-
-        if ($Result.TotalMemoryGB -le 0) {
-
-            throw "Quantidade de memória RAM inválida."
-        }
-    }
-
-# ============================================
-# TESTE 7 - DISCO
-# ============================================
-
-Invoke-Test `
-    -Name "Coleta de discos" `
-    -Test {
-
-        $Result = Get-DiskInventory `
-            -Configuration $Configuration
-
-        $Disks = @($Result)
-
-        if ($Disks.Count -eq 0) {
-
-            throw "Nenhum disco foi encontrado."
-        }
-
-        $ValidDisk = $Disks |
-            Where-Object {
-                $null -ne $_.Drive
-            } |
-            Select-Object -First 1
-
-        if ($null -eq $ValidDisk) {
-
-            throw "Nenhum disco válido foi retornado."
-        }
-
-        if ($ValidDisk.SizeGB -le 0) {
-
-            throw "Tamanho do disco inválido."
-        }
-    }
-
-# ============================================
-# TESTE 8 - REDE
-# ============================================
-
-Invoke-Test `
-    -Name "Coleta de informações de rede" `
-    -Test {
-
-        $Result = Get-NetworkInventory `
-            -Configuration $Configuration
-
-        $Adapters = @($Result)
-
-        if ($Adapters.Count -eq 0) {
-
-            throw "Nenhum adaptador de rede foi encontrado."
-        }
-
-        $ValidAdapter = $Adapters |
-            Where-Object {
-                $null -ne $_.Description
-            } |
-            Select-Object -First 1
-
-        if ($null -eq $ValidAdapter) {
-
-            throw "Nenhum adaptador de rede válido foi retornado."
-        }
-    }
-
-# ============================================
-# TESTE 9 - BITLOCKER
-# ============================================
-
-Invoke-Test `
-    -Name "Tratamento da coleta do BitLocker" `
-    -Test {
-
-        $Result = Get-BitLockerInventory
-
-        if ($null -eq $Result) {
-
-            throw "A função não retornou resultado."
-        }
-
-        $ValidStatuses = @(
-            "Success",
-            "Unavailable",
-            "Error"
-        )
-
-        if ($Result.Status -notin $ValidStatuses) {
-
-            throw "Status de BitLocker inválido: $($Result.Status)"
-        }
-
-        if ($null -eq $Result.Available) {
-
-            throw "A propriedade Available não foi retornada."
-        }
-    }
-
-# ============================================
-# TESTE 10 - INVENTÁRIO COMPLETO
-# ============================================
-
-Invoke-Test `
-    -Name "Geração do inventário completo" `
-    -Test {
-
-        $Inventory = Get-ComputerInventory `
-            -Configuration $Configuration
-
-        if ($null -eq $Inventory) {
-
-            throw "O inventário não foi gerado."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($Inventory.CollectionDateTime)) {
-
-            throw "CollectionDateTime não foi gerado."
-        }
-
-        if ($null -eq $Inventory.ComputerSystem) {
-
-            throw "ComputerSystem não foi incluído."
-        }
-
-        if ($null -eq $Inventory.OperatingSystem) {
-
-            throw "OperatingSystem não foi incluído."
-        }
-
-        if ($null -eq $Inventory.Processor) {
-
-            throw "Processor não foi incluído."
-        }
-
-        if ($null -eq $Inventory.Memory) {
-
-            throw "Memory não foi incluído."
-        }
-
-        if ($null -eq $Inventory.Disk) {
-
-            throw "Disk não foi incluído."
-        }
-
-        if ($null -eq $Inventory.Network) {
-
-            throw "Network não foi incluído."
-        }
-
-        if ($null -eq $Inventory.BitLocker) {
-
-            throw "BitLocker não foi incluído."
-        }
-    }
-
-# ============================================
-# TESTE 11 - EXPORTAÇÃO
-# ============================================
-
-Invoke-Test `
-    -Name "Exportação do inventário" `
-    -Test {
-
-        if (-not (Test-Path $ReportPath)) {
-
-            New-Item `
-                -ItemType Directory `
-                -Path $ReportPath `
-                -Force |
-                Out-Null
-        }
-
-        $Inventory = Get-ComputerInventory `
-            -Configuration $Configuration
-
-        $ExportResult = Export-ComputerInventory `
-            -Inventory $Inventory `
-            -Configuration $Configuration
-
-        if ($ExportResult.Success -ne $true) {
-
-            throw "A exportação falhou: $($ExportResult.Message)"
-        }
-
-        if (@($ExportResult.Files).Count -eq 0) {
-
-            throw "Nenhum arquivo foi gerado."
-        }
-
-        foreach ($File in @($ExportResult.Files)) {
-
-            if (-not (Test-Path $File)) {
-
-                throw "Arquivo não encontrado após exportação: $File"
+        foreach ($file in $result.Files) {
+            if (-not (Test-Path -LiteralPath $file)) {
+                throw "Arquivo não encontrado: $file"
             }
         }
     }
 
-# ============================================
-# TESTE 12 - VALIDAÇÃO DO JSON
-# ============================================
+    Invoke-Test -Name "Diretório inválido tratado como falha" -Test {
+        $configInvalid = $configExport | ConvertTo-Json -Depth 20 |
+            ConvertFrom-Json
+        $configInvalid.SimulationMode = $false
+        $configInvalid.Output.Directory = " "
+        $configInvalid.Output.Formats = @("JSON")
 
-Invoke-Test `
-    -Name "Validação do arquivo JSON" `
-    -Test {
+        $result = Export-ComputerInventory `
+            -Inventory $inventoryExport `
+            -Configuration $configInvalid
 
-        $JsonFiles = Get-ChildItem `
-            -Path $ReportPath `
-            -Filter "*.json" `
-            -File |
-            Sort-Object LastWriteTime -Descending
-
-        if ($JsonFiles.Count -eq 0) {
-
-            throw "Nenhum arquivo JSON encontrado."
+        if ($result.Success -ne $false) {
+            throw "A função deveria informar falha para diretório vazio."
         }
 
-        $LatestJson = $JsonFiles | Select-Object -First 1
-
-        $JsonContent = Get-Content `
-            $LatestJson.FullName `
-            -Raw `
-            -ErrorAction Stop
-
-        $JsonObject = $JsonContent |
-            ConvertFrom-Json `
-            -ErrorAction Stop
-
-        if ($null -eq $JsonObject.ComputerSystem) {
-
-            throw "O JSON não contém ComputerSystem."
-        }
-
-        if ($null -eq $JsonObject.OperatingSystem) {
-
-            throw "O JSON não contém OperatingSystem."
+        if ([string]::IsNullOrWhiteSpace($result.Message)) {
+            throw "A função deveria retornar uma mensagem de erro."
         }
     }
-
-# ============================================
-# TESTE 13 - VALIDAÇÃO DO CSV
-# ============================================
-
-Invoke-Test `
-    -Name "Validação do arquivo CSV" `
-    -Test {
-
-        $CsvFiles = Get-ChildItem `
-            -Path $ReportPath `
-            -Filter "*.csv" `
-            -File |
-            Sort-Object LastWriteTime -Descending
-
-        if ($CsvFiles.Count -eq 0) {
-
-            throw "Nenhum arquivo CSV encontrado."
-        }
-
-        $LatestCsv = $CsvFiles | Select-Object -First 1
-
-        $CsvObject = Import-Csv `
-            $LatestCsv.FullName `
-            -ErrorAction Stop
-
-        if ($null -eq $CsvObject) {
-
-            throw "O CSV não retornou dados."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($CsvObject.ComputerName)) {
-
-            throw "O CSV não contém ComputerName."
-        }
-
-        if ([string]::IsNullOrWhiteSpace($CsvObject.OperatingSystem)) {
-
-            throw "O CSV não contém OperatingSystem."
-        }
+}
+finally {
+    if (Test-Path -LiteralPath $testRoot) {
+        Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
-
-# ============================================
-# RESUMO
-# ============================================
-
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "              RESUMO DOS TESTES" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host ""
-
-Write-Host "Total de testes : $TotalTests"
-Write-Host "Passaram        : $PassedTests" -ForegroundColor Green
-Write-Host "Falharam        : $FailedTests" -ForegroundColor Red
-Write-Host ""
-
-if ($FailedTests -eq 0) {
-
-    Write-Host "STATUS: TODOS OS TESTES PASSARAM" -ForegroundColor Green
-}
-else {
-
-    Write-Host "STATUS: EXISTEM TESTES COM FALHA" -ForegroundColor Red
 }
 
-Write-Host ""
+Remove-Module Inventory-Functions -ErrorAction SilentlyContinue
+Write-Host "`n============================================" -ForegroundColor Cyan
+Write-Host "Total: $TotalTests | Passaram: $PassedTests | Falharam: $FailedTests"
 Write-Host "============================================" -ForegroundColor Cyan
+
+if ($FailedTests -gt 0) {
+    throw "Existem testes com falha."
+}

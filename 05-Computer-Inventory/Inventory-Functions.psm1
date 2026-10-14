@@ -374,6 +374,94 @@ function Get-ComputerInventory {
     $Network = @()
     $BitLocker = $null
 
+
+    if ($Configuration.SimulationMode -eq $true) {
+
+        $ComputerSystem = $null
+        $OperatingSystem = $null
+        $Processor = $null
+        $Memory = $null
+        $Disk = @()
+        $Network = @()
+        $BitLocker = $null
+
+        if ($Configuration.Inventory.ComputerSystem -eq $true) {
+            $ComputerSystem = [PSCustomObject]@{
+                ComputerName = "SIMULATED-PC"
+                LoggedOnUser = "DEMO\Usuario"
+                Manufacturer = "Fabricante de Demonstracao"
+                Model = "Modelo de Demonstracao"
+                SerialNumber = "SIM-000001"
+                BIOSVersion = "SIM-1.0"
+            }
+        }
+
+        if ($Configuration.Inventory.OperatingSystem -eq $true) {
+            $OperatingSystem = [PSCustomObject]@{
+                OperatingSystem = "Windows (Simulacao)"
+                Version = "0.0"
+                Build = "00000"
+                Architecture = "64-bit"
+            }
+        }
+
+        if ($Configuration.Inventory.Processor -eq $true) {
+            $Processor = [PSCustomObject]@{
+                ProcessorName = "CPU de Demonstracao"
+                PhysicalCores = 4
+                LogicalProcessors = 8
+            }
+        }
+
+        if ($Configuration.Inventory.Memory -eq $true) {
+            $Memory = [PSCustomObject]@{
+                TotalMemoryGB = 16
+            }
+        }
+
+        if ($Configuration.Inventory.Disk -eq $true) {
+            $Disk = @(
+                [PSCustomObject]@{
+                    Drive = "C:"
+                    SizeGB = 256
+                    FreeSpaceGB = 128
+                }
+            )
+        }
+
+        if ($Configuration.Inventory.Network -eq $true) {
+            $Network = @(
+                [PSCustomObject]@{
+                    Description = "Adaptador de Rede de Demonstracao"
+                    IPv4Address = "192.0.2.10"
+                    MACAddress = "00-00-00-00-00-01"
+                }
+            )
+        }
+
+        if ($Configuration.Inventory.BitLocker -eq $true) {
+            $BitLocker = [PSCustomObject]@{
+                Status = "Unavailable"
+                Available = $false
+                Volumes = @()
+                Message = "Dados ficticios: BitLocker nao foi consultado."
+            }
+        }
+
+        return [PSCustomObject]@{
+            CollectionDateTime = (Get-Date).ToUniversalTime().ToString("o")
+            SimulationMode = $true
+            ComputerSystem = $ComputerSystem
+            OperatingSystem = $OperatingSystem
+            Processor = $Processor
+            Memory = $Memory
+            Disk = @($Disk)
+            Network = @($Network)
+            BitLocker = $BitLocker
+        }
+    }
+
+
     if ($Configuration.Inventory.ComputerSystem -eq $true) {
 
         $ComputerSystem = Get-ComputerSystemInventory
@@ -434,11 +522,32 @@ function Export-ComputerInventory {
         [PSCustomObject]$Configuration
     )
 
+
+    if ($Configuration.SimulationMode -eq $true) {
+        return [PSCustomObject]@{
+            Success = $true
+            SimulationMode = $true
+            Directory = $null
+            Files = @()
+            Message = "Simulacao concluida. Nenhum arquivo foi gravado."
+        }
+    }
+
+
     try {
 
-        $ReportDirectory = Join-Path `
-            $PSScriptRoot `
-            $Configuration.Output.Directory
+        $OutputDirectory = [string]$Configuration.Output.Directory
+
+        if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+            throw "O diretorio de saida nao foi configurado."
+        }
+
+        if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+            $ReportDirectory = $OutputDirectory
+        }
+        else {
+            $ReportDirectory = Join-Path $PSScriptRoot $OutputDirectory
+        }
 
         if (-not (Test-Path $ReportDirectory)) {
 

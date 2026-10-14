@@ -274,28 +274,42 @@ catch {
     exit 1
 }
 
+
 if ($ExportResult.Success -eq $true) {
 
-    Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host "          ARQUIVOS GERADOS" -ForegroundColor Cyan
-    Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host ""
+    if ($Configuration.SimulationMode -eq $true) {
 
-    foreach ($File in @($ExportResult.Files)) {
-
-        Write-Host $File -ForegroundColor Green
+        Write-Host "============================================" -ForegroundColor Yellow
+        Write-Host "       SIMULACAO CONCLUIDA" -ForegroundColor Yellow
+        Write-Host "============================================" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host $ExportResult.Message -ForegroundColor Yellow
+        Write-Host "Nenhum relatorio foi criado." -ForegroundColor Yellow
+        Write-Host ""
     }
+    else {
 
-    Write-Host ""
+        Write-Host "============================================" -ForegroundColor Cyan
+        Write-Host "          ARQUIVOS GERADOS" -ForegroundColor Cyan
+        Write-Host "============================================" -ForegroundColor Cyan
+        Write-Host ""
+
+        foreach ($File in @($ExportResult.Files)) {
+            Write-Host $File -ForegroundColor Green
+        }
+
+        Write-Host ""
+    }
 }
 else {
 
     Write-Host ""
-    Write-Host "ERRO: O inventário foi coletado, mas a exportação falhou." -ForegroundColor Red
+    Write-Host "ERRO: O inventario foi coletado, mas a exportacao falhou." -ForegroundColor Red
     Write-Host $ExportResult.Message -ForegroundColor Red
     Write-Host ""
     exit 1
 }
+
 
 # ============================================
 # FINALIZAÇÃO
