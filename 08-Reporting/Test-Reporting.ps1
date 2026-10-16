@@ -361,60 +361,65 @@ Test-Result "Gerar Dataset consolidado" {
 
 
 # ============================================================
-# TESTE 13 - EXPORTAÇÃO
+# TESTE 13 - EXPORTAÇÃO EM SIMULAÇÃO
 # ============================================================
 
-Test-Result "Exportar Dataset" {
+Test-Result "Exportar Dataset em simulação sem gravar arquivos" {
 
-    $Dataset = New-ReportingDataset `
-        -Configuration $Configuration
+    $Dataset = New-ReportingDataset -Configuration $Configuration
 
     $Export = Export-ReportingDataset `
         -Dataset $Dataset `
         -Configuration $Configuration
 
     if ($Export.Success -ne $true) {
+        throw "A exportação simulada não retornou sucesso."
+    }
 
-        throw "A exportação não retornou sucesso."
+    if ($Export.SimulationMode -ne $true) {
+        throw "O resultado deveria indicar modo de simulação."
     }
 
     if (@($Export.Files).Count -lt 2) {
-
-        throw "A exportação deveria gerar pelo menos dois arquivos."
+        throw "Deveriam ser previstos pelo menos dois arquivos."
     }
 
     foreach ($File in $Export.Files) {
-
-        if (-not (Test-Path $File)) {
-
-            throw "O arquivo exportado não foi encontrado: $File"
+        if (Test-Path -LiteralPath $File) {
+            throw "A simulação não deveria criar o arquivo: $File"
         }
     }
 }
 
 
 # ============================================================
-# TESTE 14 - INVOKE REPORTING
+# TESTE 14 - INVOKE REPORTING EM SIMULAÇÃO
 # ============================================================
 
-Test-Result "Executar Invoke-Reporting" {
+Test-Result "Executar Invoke-Reporting em simulação" {
 
-    $Result = Invoke-Reporting `
-        -Configuration $Configuration
+    $Result = Invoke-Reporting -Configuration $Configuration
 
     if ($Result.Success -ne $true) {
-
         throw "Invoke-Reporting não retornou sucesso."
     }
 
     if ($Result.Summary.TotalFiles -eq 0) {
-
         throw "Invoke-Reporting não processou arquivos."
     }
 
     if ($Result.Summary.FailedFiles -ne 0) {
-
         throw "Invoke-Reporting identificou falhas."
+    }
+
+    if (@($Result.Files).Count -lt 2) {
+        throw "A simulação deveria informar os caminhos previstos."
+    }
+
+    foreach ($File in $Result.Files) {
+        if (Test-Path -LiteralPath $File) {
+            throw "Foi encontrado arquivo durante a simulação: $File"
+        }
     }
 }
 
@@ -423,34 +428,39 @@ Test-Result "Executar Invoke-Reporting" {
 # TESTE 15 - BLOQUEAR FORMATO DE EXPORTAÇÃO INVÁLIDO
 # ============================================================
 
-Test-Result "Bloquear formato de exportação inválido" {
+Test-Result "Bloquear formato inválido sem criar pasta" {
 
-    $TestConfiguration = $Configuration.PSObject.Copy()
+    $TestConfiguration = $Configuration |
+        ConvertTo-Json -Depth 20 |
+        ConvertFrom-Json
 
-    $TestConfiguration.Output.Formats = @(
-        "INVALID"
-    )
+    $TestOutputDirectory = Join-Path `
+        -Path $env:TEMP `
+        -ChildPath ("Reporting-InvalidFormat-" + [guid]::NewGuid().ToString("N"))
 
-    $Dataset = New-ReportingDataset `
-        -Configuration $Configuration
+    $TestConfiguration.Output.Directory = $TestOutputDirectory
+    $TestConfiguration.Output.Formats = @("INVALID")
+    $TestConfiguration.SimulationMode = $false
 
+    $Dataset = New-ReportingDataset -Configuration $TestConfiguration
     $ErrorCaptured = $false
 
     try {
-
         Export-ReportingDataset `
             -Dataset $Dataset `
             -Configuration $TestConfiguration |
             Out-Null
     }
     catch {
-
         $ErrorCaptured = $true
     }
 
-    if ($ErrorCaptured -ne $true) {
+    if (-not $ErrorCaptured) {
+        throw "Um formato inválido deveria ser bloqueado."
+    }
 
-        throw "Um formato de exportação inválido deveria ser bloqueado."
+    if (Test-Path -LiteralPath $TestOutputDirectory) {
+        throw "A validação criou uma pasta indevidamente."
     }
 }
 
@@ -546,11 +556,210 @@ Test-Result "Bloquear fonte sem FilePattern" {
 
 
 # ============================================================
+# TESTE 19 - EXPORTAÇÃO REAL ISOLADA
+# ============================================================
+
+Test-Result "Exportação real isolada em diretório temporário" {
+
+    $TestOutputDirectory = Join-Path $env:TEMP (
+        "Reporting-RealExport-" + [guid]::NewGuid().ToString("N")
+    )
+
+    try {
+        $TestConfiguration = Get-Content -LiteralPath $ConfigPath -Raw |
+            ConvertFrom-Json
+
+        $TestConfiguration = $TestConfiguration |
+            ConvertTo-Json -Depth 20 |
+            ConvertFrom-Json
+
+        $TestConfiguration.Output.Directory = $TestOutputDirectory
+        $TestConfiguration.Output.Formats = @("JSON", "CSV")
+        $TestConfiguration.SimulationMode = $false
+
+        $Dataset = New-ReportingDataset -Configuration $TestConfiguration
+
+        $Export = Export-ReportingDataset `
+            -Dataset $Dataset `
+            -Configuration $TestConfiguration
+
+        if ($Export.Success -ne $true) {
+            throw "A exportação real não retornou sucesso."
+        }
+
+        if ($Export.SimulationMode -ne $false) {
+            throw "O resultado deveria indicar exportação real."
+        }
+
+        if (-not (Test-Path -LiteralPath $TestOutputDirectory -PathType Container)) {
+            throw "A pasta temporária de exportação não foi criada."
+        }
+
+        $JsonFiles = @(Get-ChildItem -LiteralPath $TestOutputDirectory -Filter "*.json" -File)
+        $CsvFiles = @(Get-ChildItem -LiteralPath $TestOutputDirectory -Filter "*.csv" -File)
+
+        if ($JsonFiles.Count -ne 1) {
+            throw "Esperado 1 arquivo JSON; encontrados: $($JsonFiles.Count)."
+        }
+
+        if ($CsvFiles.Count -ne 1) {
+            throw "Esperado 1 arquivo CSV; encontrados: $($CsvFiles.Count)."
+        }
+
+        foreach ($File in @($JsonFiles) + @($CsvFiles)) {
+            if ($File.Length -le 0) {
+                throw "O arquivo exportado está vazio: $($File.FullName)"
+            }
+        }
+
+        Get-Content -LiteralPath $JsonFiles[0].FullName -Raw |
+            ConvertFrom-Json |
+            Out-Null
+
+        if ($Export.Files.Count -ne 2) {
+            throw "O resultado deveria informar os dois arquivos exportados."
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $TestOutputDirectory -PathType Container) {
+            Remove-Item -LiteralPath $TestOutputDirectory -Recurse -Force
+        }
+    }
+}
+
+# ============================================================
+# TESTE 20 - FALHA NA GRAVAÇÃO
+# ============================================================
+
+Test-Result "Bloquear exportação quando o destino impede gravação" {
+
+    $TempRoot = Join-Path $env:TEMP (
+        "Reporting-WriteFailure-" + [guid]::NewGuid().ToString("N")
+    )
+
+    $BlockingFile = Join-Path $TempRoot "DestinoOcupado"
+    $TestOutputDirectory = Join-Path $BlockingFile "Reports"
+
+    try {
+        New-Item -ItemType Directory -Path $TempRoot -Force -ErrorAction Stop |
+            Out-Null
+
+        Set-Content -LiteralPath $BlockingFile -Value "arquivo de bloqueio" -ErrorAction Stop
+
+        $TestConfiguration = Get-Content -LiteralPath $ConfigPath -Raw |
+            ConvertFrom-Json
+
+        $TestConfiguration = $TestConfiguration |
+            ConvertTo-Json -Depth 20 |
+            ConvertFrom-Json
+
+        $TestConfiguration.Output.Directory = $TestOutputDirectory
+        $TestConfiguration.Output.Formats = @("JSON")
+        $TestConfiguration.SimulationMode = $false
+
+        $Dataset = New-ReportingDataset -Configuration $TestConfiguration
+
+        $ExportFailed = $false
+
+        try {
+            Export-ReportingDataset `
+                -Dataset $Dataset `
+                -Configuration $TestConfiguration |
+                Out-Null
+        }
+        catch {
+            $ExportFailed = $true
+        }
+
+        if (-not $ExportFailed) {
+            throw "A exportação deveria falhar porque o caminho pai é um arquivo."
+        }
+
+        if (Test-Path -LiteralPath $TestOutputDirectory) {
+            throw "O destino inválido não deveria ter sido criado."
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $TempRoot) {
+            Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 # RESULTADO
 # ============================================================
 
 Write-Host ""
 Write-Host "=============================================" -ForegroundColor Cyan
+
+# Teste 21 - Bloquear formatos duplicados antes de criar a pasta
+Test-Result "Bloquear formatos duplicados antes de criar a pasta" {
+    $DuplicateConfig = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+$DuplicateConfig = $DuplicateConfig | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $DuplicateOutput = Join-Path ([System.IO.Path]::GetTempPath()) ("Reporting-Duplicados-" + [guid]::NewGuid().ToString("N"))
+    $DuplicateConfig.Output.Directory = $DuplicateOutput
+    $DuplicateConfig.Output.Formats = @("JSON", "json")
+    $DuplicateConfig.SimulationMode = $false
+
+    try {
+        $DuplicateDataset = New-ReportingDataset -Configuration $DuplicateConfig
+        $DuplicateError = $null
+
+        try {
+            Export-ReportingDataset -Configuration $DuplicateConfig -Dataset $DuplicateDataset | Out-Null
+        }
+        catch {
+            $DuplicateError = $_.Exception.Message
+        }
+
+        if (-not $DuplicateError -or $DuplicateError -notmatch "duplicados") {
+            throw "A exportação não rejeitou os formatos duplicados."
+        }
+
+        if (Test-Path -LiteralPath $DuplicateOutput) {
+            throw "A pasta de saída foi criada apesar da configuração inválida."
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $DuplicateOutput) {
+            Remove-Item -LiteralPath $DuplicateOutput -Recurse -Force
+        }
+    }
+}
+
+# Teste 22 - Validar conteúdo do CSV exportado
+Test-Result "Validar cabeçalhos e registros do CSV exportado" {
+    $CsvConfig = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+$CsvConfig = $CsvConfig | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $CsvOutput = Join-Path ([System.IO.Path]::GetTempPath()) ("Reporting-CSV-" + [guid]::NewGuid().ToString("N"))
+    $CsvConfig.Output.Directory = $CsvOutput
+    $CsvConfig.Output.Formats = @("CSV")
+    $CsvConfig.SimulationMode = $false
+
+    try {
+        $CsvDataset = New-ReportingDataset -Configuration $CsvConfig
+        $CsvResult = Export-ReportingDataset -Configuration $CsvConfig -Dataset $CsvDataset
+        $CsvFile = @($CsvResult.Files | Where-Object { $_ -match '\.csv$' }) | Select-Object -First 1
+
+        if (-not $CsvFile -or -not (Test-Path -LiteralPath $CsvFile)) {
+            throw "Arquivo CSV não encontrado."
+        }
+
+        $CsvRows = @(Import-Csv -LiteralPath $CsvFile)
+
+        if ($CsvRows.Count -eq 0) {
+            throw "O CSV não contém registros."
+        }
+
+        if (@($CsvRows[0].PSObject.Properties).Count -eq 0) {
+            throw "O CSV não contém cabeçalhos reconhecíveis."
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $CsvOutput) {
+            Remove-Item -LiteralPath $CsvOutput -Recurse -Force
+        }
+    }
+}
 Write-Host "             RESULTADO DOS TESTES" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""

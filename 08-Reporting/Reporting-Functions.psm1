@@ -319,6 +319,7 @@ function New-ReportingDataset {
 }
 
 
+
 function Export-ReportingDataset {
 
     param (
@@ -332,29 +333,75 @@ function Export-ReportingDataset {
     Test-ReportingConfiguration `
         -Configuration $Configuration |
         Out-Null
+$SupportedFormats = @("JSON", "CSV")
+$Formats = @($Configuration.Output.Formats)
+
+$DuplicateFormats = @(
+    $Formats |
+        ForEach-Object { ([string]$_).ToUpperInvariant() } |
+        Group-Object |
+        Where-Object { $_.Count -gt 1 }
+)
+
+if ($DuplicateFormats.Count -gt 0) {
+    $DuplicateNames = ($DuplicateFormats | ForEach-Object { $_.Name }) -join ", "
+    throw "Formatos de exportação duplicados: $DuplicateNames."
+}
+
+foreach ($Format in $Formats) {
+        if (
+            [string]::IsNullOrWhiteSpace([string]$Format) -or
+            $SupportedFormats -notcontains ([string]$Format).ToUpperInvariant()
+        ) {
+            throw "Formato de exportação '$Format' não suportado."
+        }
+    }
 
     $OutputDirectory = Resolve-ReportingPath `
         -Path $Configuration.Output.Directory
 
-    if (-not (Test-Path $OutputDirectory)) {
+    $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $ExportedFiles = @()
+    $ExpectedFiles = @()
 
+    foreach ($Format in $Formats) {
+        switch (([string]$Format).ToUpperInvariant()) {
+            "JSON" {
+                $ExpectedFiles += Join-Path `
+                    -Path $OutputDirectory `
+                    -ChildPath "Reporting-$Timestamp.json"
+            }
+
+            "CSV" {
+                $ExpectedFiles += Join-Path `
+                    -Path $OutputDirectory `
+                    -ChildPath "Reporting-Summary-$Timestamp.csv"
+            }
+        }
+    }
+
+    if ($Configuration.SimulationMode -eq $true) {
+        return [PSCustomObject]@{
+            Success         = $true
+            SimulationMode  = $true
+            OutputDirectory = $OutputDirectory
+            Files           = $ExpectedFiles
+            Message         = "Simulação concluída. Nenhum arquivo foi gravado."
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $OutputDirectory)) {
         New-Item `
             -ItemType Directory `
             -Path $OutputDirectory `
-            -Force |
+            -Force `
+            -ErrorAction Stop |
             Out-Null
     }
 
-    $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-
-    $ExportedFiles = @()
-
-    foreach ($Format in $Configuration.Output.Formats) {
-
-        switch ($Format.ToUpper()) {
-
+    foreach ($Format in $Formats) {
+        switch (([string]$Format).ToUpperInvariant()) {
             "JSON" {
-
                 $FilePath = Join-Path `
                     -Path $OutputDirectory `
                     -ChildPath "Reporting-$Timestamp.json"
@@ -362,43 +409,38 @@ function Export-ReportingDataset {
                 $Dataset |
                     ConvertTo-Json -Depth 10 |
                     Set-Content `
-                        -Path $FilePath `
-                        -Encoding UTF8
+                        -LiteralPath $FilePath `
+                        -Encoding UTF8 `
+                        -ErrorAction Stop
 
                 $ExportedFiles += $FilePath
             }
 
             "CSV" {
-
                 $FilePath = Join-Path `
                     -Path $OutputDirectory `
                     -ChildPath "Reporting-Summary-$Timestamp.csv"
 
                 $Dataset.Summary |
                     Export-Csv `
-                        -Path $FilePath `
+                        -LiteralPath $FilePath `
                         -NoTypeInformation `
-                        -Encoding UTF8
+                        -Encoding UTF8 `
+                        -ErrorAction Stop
 
                 $ExportedFiles += $FilePath
-            }
-
-            default {
-
-                throw "Formato de exportação '$Format' não suportado."
             }
         }
     }
 
     return [PSCustomObject]@{
         Success         = $true
+        SimulationMode  = $false
         OutputDirectory = $OutputDirectory
         Files           = $ExportedFiles
         Message         = "Relatórios exportados com sucesso."
     }
 }
-
-
 function Invoke-Reporting {
 
     param (
