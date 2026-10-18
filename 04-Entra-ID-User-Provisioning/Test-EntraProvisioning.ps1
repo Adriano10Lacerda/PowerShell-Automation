@@ -1286,3 +1286,9 @@ else {
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
+# V1 EXIT CODE HANDLING
+if ($FailedTests -gt 0) {
+    exit 1
+}
+
+exit 0

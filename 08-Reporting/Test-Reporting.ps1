@@ -778,3 +778,10 @@ else {
 
     Write-Host "STATUS: EXISTEM TESTES COM FALHA" -ForegroundColor Red
 }
+
+# V1 EXIT CODE HANDLING
+if ($FailedTests -gt 0) {
+    exit 1
+}
+
+exit 0

@@ -25,6 +25,9 @@ The toolkit is organized into independent modules and a central interface:
 - **07 - GPO Management**
 - **08 - Reporting**
 - **09 - Interface & Toolkit Launcher**
+- **10 - Interface V2**: interface alternativa de linha de comando
+- **11 - Interface GUI**: interface gráfica WPF
+- **Core**: componentes reutilizáveis de auditoria, computadores, grupos e usuários
 
 The modules can be used independently or launched through the central interface.
 
@@ -226,24 +229,20 @@ The public repository is designed to contain examples and source code without ex
 
 ## Automated Testing
 
-The project includes automated test scripts for all nine modules.
+The project contains 19 automated test scripts covering the numbered modules, interfaces, and reusable Core components.
 
-| Module | Tests Passed |
-|---|---:|
-| 01 - Password Generator | 23 |
-| 02 - Configuration | 17 |
-| 03 - AD User Provisioning | 25 |
-| 04 - Entra ID User Provisioning | 29 |
-| 05 - Computer Inventory | 13 |
-| 06 - AD Group Management | 19 |
-| 07 - GPO Management | 21 |
-| 08 - Reporting | 18 |
-| 09 - Interface | 19 |
-| **Total** | **184** |
+| Test area | Scripts | Tests passed |
+|---|---:|---:|
+| Modules 01–09 | 9 | 190 |
+| Interfaces 10–11 | 2 | 102 |
+| Core components | 8 | 404 |
+| **Total** | **19** | **696** |
 
-All 184 tests passed in the final test run. Module 09 also includes interface validation tests.
+The recorded regression run completed all 19 scripts with exit code 0 and no reported test failures. The three test scripts for Entra ID provisioning, GPO management, and reporting were also updated to return exit code 1 when their failure counter is greater than zero. Controlled failure tests confirmed this behavior.
 
-These results reflect automated test scripts executed in the development environment. They do not replace real-environment integration testing, security validation, or acceptance testing.
+Automated tests do not replace integration, security, or acceptance testing in a real environment. Some Core tests reported that a default Active Directory server with Active Directory Web Services could not be found. Therefore, successful test results must not be interpreted as proof of live Active Directory, Entra ID, or Group Policy operations.
+
+The GUI test suite validates structure and wiring; it is not a full end-to-end test of real administrative operations.
 
 ---
 
@@ -298,6 +297,9 @@ Local configuration files containing environment-specific values are excluded th
 | 07 - GPO Management | Group Policy PowerShell module (`GroupPolicy`); domain connectivity and suitable permissions for real GPO operations |
 | 08 - Reporting | PowerShell runtime; JSON/CSV data files |
 | 09 - Interface & Toolkit Launcher | PowerShell runtime and project files for the modules being launched |
+| 10 - Interface V2 | PowerShell runtime and the modules used by selected actions |
+| 11 - Interface GUI | Supported Windows environment, PowerShell, WPF, and project files |
+| Core | Dependencies vary by component; Active Directory operations require the relevant module, connectivity, and permissions |
 
 ### Installing Microsoft Graph PowerShell modules
 
@@ -341,58 +343,33 @@ Install or enable the appropriate RSAT components using the supported method for
 
 ## Project Structure
 
+The repository is organized into numbered modules, two additional interfaces, and reusable Core components.
+
 ```text
 PowerShell-Automation/
 ├── 01-Password-Generator/
-│   ├── Generate-Password.ps1
-│   └── README.md
 ├── 02-Configuration/
-│   ├── config.example.json
-│   ├── config.json              # Local / ignored
-│   ├── Configuration.psm1
-│   └── Validate-Configuration.ps1
 ├── 03-AD-User-Provisioning/
-│   ├── AD-Configuration.json
-│   ├── AD-Functions.psm1
-│   ├── Provision-ADUser.ps1
-│   ├── Test-ADUserProvisioning.ps1
-│   └── README.md
 ├── 04-Entra-ID-User-Provisioning/
-│   ├── Entra-Configuration.example.json
-│   ├── Entra-Configuration.json  # Local / ignored
-│   ├── Entra-Functions.psm1
-│   ├── Provision-EntraUser.ps1
-│   └── Test-EntraProvisioning.ps1
 ├── 05-Computer-Inventory/
-│   ├── Computer-Inventory.ps1
-│   ├── Inventory-Configuration.json
-│   ├── Inventory-Functions.psm1
-│   ├── Test-ComputerInventory.ps1
-│   └── Reports/                 # Local / ignored
 ├── 06-AD-Group-Management/
-│   ├── AD-Group-Management.ps1
-│   ├── Group-Configuration.json
-│   ├── Group-Functions.psm1
-│   └── Test-ADGroupManagement.ps1
 ├── 07-GPO-Management/
-│   ├── GPO-Management.ps1
-│   ├── GPO-Configuration.json
-│   ├── GPO-Functions.psm1
-│   └── Test-GPOManagement.ps1
 ├── 08-Reporting/
-│   ├── Reporting.ps1
-│   ├── Reporting-Configuration.json
-│   ├── Reporting-Functions.psm1
-│   ├── Test-Reporting.ps1
-│   └── Reports/                 # Local / ignored
 ├── 09-Interface/
-│   ├── Interface.ps1
-│   ├── Interface-Functions.psm1
-│   └── Test-Interface.ps1
+├── 10-Interface-V2/
+├── 11-Interface-GUI/
+├── Core/
+│   ├── Audit/
+│   ├── Computer/
+│   ├── Group/
+│   └── User/
+├── docs/
 ├── .gitignore
 ├── LICENSE
 └── README.md
 ```
+
+Each module may contain its own scripts, configuration files, and tests. Consult the relevant directory before running a module. Environment-specific configuration files should remain private and must not be committed with credentials or sensitive tenant or infrastructure details.
 
 ---
 
@@ -422,24 +399,21 @@ Individual modules can also be executed directly from their respective directori
 
 ## Current Status
 
-The toolkit currently includes 9 modules and 184 automated tests. All 184 tests passed in the final test run. The V1.0.0 release candidate has completed code, automated testing, security, dependency, documentation, configuration, and repository structure checks.
+The project has 11 numbered modules and interfaces, reusable components under Core, and a recorded regression result of 696 passing tests across 19 scripts.
 
-Real-environment integration and acceptance testing remain outside the scope of the automated test suite and should be performed in a controlled environment before production use.
+Implemented and tested in the development environment:
+- Password generation and configuration validation
+- AD and Entra ID provisioning workflows
+- Computer inventory, group management, GPO management, and reporting
+- Command-line interfaces and a WPF graphical interface
+- Automated tests and Simulation Mode in the relevant workflows
+- Exit-code handling for the Entra ID, GPO, and reporting test scripts
 
-Implemented:
+The test results describe the executed automated test suite. They do not establish that every feature has been validated against live infrastructure. The graphical interface includes informational or disabled real-operation areas, and some tests reported that a default Active Directory Web Services server was unavailable.
 
-- [x] Secure Password Generator
-- [x] Configuration Validation
-- [x] Active Directory User Provisioning
-- [x] Microsoft Entra ID User Provisioning
-- [x] Computer Inventory
-- [x] Active Directory Group Management
-- [x] GPO Management
-- [x] Reporting
-- [x] Central Interface
-- [x] Simulation Mode
-- [x] Automated Testing
-- [x] Public configuration sanitization
+Before production use, validate configuration, permissions, connectivity, security controls, and the expected behavior in an authorized test environment.
+
+Version 1 should be considered ready for release only after the remaining documentation, repository, security, and integration-readiness checks have been reviewed.
 
 ---
 
