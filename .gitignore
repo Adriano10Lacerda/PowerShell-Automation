@@ -13,3 +13,8 @@ __pycache__/
 
 # Local Active Directory configuration
 /03-AD-User-Provisioning/AD-Configuration.json
+
+
+# Local Computer Inventory configuration and backup
+/05-Computer-Inventory/Inventory-Configuration.json
+/05-Computer-Inventory/Inventory-Configuration.local-backup.json

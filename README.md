@@ -1,5 +1,4 @@
 # PowerShell Automation Toolkit
-
 ## Enterprise IT Automation
 
 ![PowerShell Automation Toolkit Interface](docs/interface.png)
@@ -15,7 +14,6 @@ The project is structured to be reusable across different environments through e
 The goal of this project is to transform repetitive IT administration activities into controlled, repeatable, and auditable PowerShell workflows.
 
 The toolkit is organized into independent modules and a central interface:
-
 - **01 - Password Generator**
 - **02 - Configuration**
 - **03 - AD User Provisioning**
@@ -25,9 +23,9 @@ The toolkit is organized into independent modules and a central interface:
 - **07 - GPO Management**
 - **08 - Reporting**
 - **09 - Interface & Toolkit Launcher**
-- **10 - Interface V2**: interface alternativa de linha de comando
-- **11 - Interface GUI**: interface gráfica WPF
-- **Core**: componentes reutilizáveis de auditoria, computadores, grupos e usuários
+- **10 - Interface V2**: alternative command-line interface
+- **11 - Interface GUI**: WPF graphical interface
+- **Core**: reusable audit, computer, group, and user components
 
 The modules can be used independently or launched through the central interface.
 
@@ -190,7 +188,6 @@ Example menu:
           POWERSHELL AUTOMATION TOOLKIT
              Enterprise IT Automation
 ==================================================
-
   1 - Password Generator
   2 - AD User Provisioning
   3 - Entra ID User Provisioning
@@ -229,7 +226,7 @@ The public repository is designed to contain examples and source code without ex
 
 ## Automated Testing
 
-The project contains 19 automated test scripts covering the numbered modules, interfaces, and reusable Core components.
+The project contains 19 unique automated test scripts covering the numbered modules, interfaces, and reusable Core components.
 
 | Test area | Scripts | Tests passed |
 |---|---:|---:|
@@ -240,7 +237,9 @@ The project contains 19 automated test scripts covering the numbered modules, in
 
 The recorded regression run completed all 19 scripts with exit code 0 and no reported test failures. The three test scripts for Entra ID provisioning, GPO management, and reporting were also updated to return exit code 1 when their failure counter is greater than zero. Controlled failure tests confirmed this behavior.
 
-Automated tests do not replace integration, security, or acceptance testing in a real environment. Some Core tests reported that a default Active Directory server with Active Directory Web Services could not be found. Therefore, successful test results must not be interpreted as proof of live Active Directory, Entra ID, or Group Policy operations.
+A subsequent local validation session executed 20 test runs covering 19 unique test scripts. All 695 tests reported across those runs passed, with the Interface test executed twice. This run is separate from the historical regression result of 696 tests shown above. Automated tests do not replace integration, security, or acceptance testing in a real environment.
+
+Some Core tests reported that a default Active Directory server with Active Directory Web Services could not be found. Therefore, successful test results must not be interpreted as proof of live Active Directory, Entra ID, or Group Policy operations.
 
 The GUI test suite validates structure and wiring; it is not a full end-to-end test of real administrative operations.
 
@@ -257,6 +256,8 @@ No changes will be made to Active Directory.
 
 Useful for development, testing, demonstrations, training, interviews, and customer presentations.
 
+Always review each module's configuration and implementation before executing operations against a real environment.
+
 ---
 
 ## Configuration
@@ -271,7 +272,35 @@ example.onmicrosoft.com
 EMP
 ```
 
-Local configuration files containing environment-specific values are excluded through `.gitignore`.
+Local configuration files containing environment-specific values are excluded through `.gitignore`. Commit example configuration files, not local configuration files containing environment-specific settings.
+
+### Computer Inventory configuration
+
+Before running the Computer Inventory module in a fresh clone, create a local configuration file from the example:
+
+```powershell
+if (-not (Test-Path ".\05-Computer-Inventory\Inventory-Configuration.json")) {
+    Copy-Item ".\05-Computer-Inventory\Inventory-Configuration.example.json" ".\05-Computer-Inventory\Inventory-Configuration.json"
+}
+```
+
+This command creates the local configuration only if it does not already exist. It will not overwrite existing local settings.
+
+The example configuration sets `SimulationMode` to `true` by default. Keep simulation enabled while reviewing the module and validating its behavior. Real inventory collection may query the target computer and access information that depends on the operating system and permissions.
+
+The local `05-Computer-Inventory/Inventory-Configuration.json` file is excluded from version control. Only `Inventory-Configuration.example.json` should be committed to the public repository.
+
+### Active Directory user provisioning configuration
+
+The AD User Provisioning module uses a local `AD-Configuration.json` file. When setting up a fresh clone, create it from `AD-Configuration.example.json` only if the local file does not already exist:
+
+```powershell
+if (-not (Test-Path ".\03-AD-User-Provisioning\AD-Configuration.json")) {
+    Copy-Item ".\03-AD-User-Provisioning\AD-Configuration.example.json" ".\03-AD-User-Provisioning\AD-Configuration.json"
+}
+```
+
+Review the configuration and keep `SimulationMode` enabled while testing. Do not commit local domain, server, OU, or other environment-specific settings.
 
 ---
 
@@ -393,13 +422,13 @@ Start the central interface:
 .\09-Interface\Interface.ps1
 ```
 
-Individual modules can also be executed directly from their respective directories.
+Individual modules can also be executed directly from their respective directories. Before running a module, review its README or scripts, required dependencies, configuration files, and Simulation Mode behavior.
 
 ---
 
 ## Current Status
 
-The project has 11 numbered modules and interfaces, reusable components under Core, and a recorded regression result of 696 passing tests across 19 scripts.
+The project has 11 numbered modules and interfaces, reusable components under Core, and a recorded regression result of 696 passing tests across 19 unique scripts.
 
 Implemented and tested in the development environment:
 - Password generation and configuration validation
@@ -408,6 +437,7 @@ Implemented and tested in the development environment:
 - Command-line interfaces and a WPF graphical interface
 - Automated tests and Simulation Mode in the relevant workflows
 - Exit-code handling for the Entra ID, GPO, and reporting test scripts
+- Local configuration protection for AD User Provisioning and Computer Inventory
 
 The test results describe the executed automated test suite. They do not establish that every feature has been validated against live infrastructure. The graphical interface includes informational or disabled real-operation areas, and some tests reported that a default Active Directory Web Services server was unavailable.
 
