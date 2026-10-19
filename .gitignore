@@ -10,3 +10,6 @@ __pycache__/
 
 # Backup files
 *.bak*
+
+# Local Active Directory configuration
+/03-AD-User-Provisioning/AD-Configuration.json

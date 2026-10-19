@@ -38,9 +38,11 @@ Atualmente o módulo possui:
 ```text
 03-AD-User-Provisioning
 │
-├── AD-Configuration.json
+├── AD-Configuration.example.json
+├── AD-Configuration.json       # Criado localmente; ignorado pelo Git
 ├── AD-Functions.psm1
 ├── Provision-ADUser.ps1
+├── Test-ADUserProvisioning.ps1
 └── README.md
 ```
 
