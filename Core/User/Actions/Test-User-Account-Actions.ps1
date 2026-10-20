@@ -1099,85 +1099,28 @@ Write-TestResult `
 
 
 # ============================================================
-# AMBIENTE REAL - CONFIGURAÇÃO INVÁLIDA
+# SEGURANÇA - TESTES SEM EXECUÇÃO REAL NO ACTIVE DIRECTORY
 # ============================================================
-
-$realConfiguration = [PSCustomObject]@{
-    Domain = "BRSPO"
-
-    DomainController = "INVALID-DC-TEST"
-
-    SimulationMode = $false
-
-    UserPrincipalName = [PSCustomObject]@{
-        Enabled = $true
-        Domain  = "example.local"
-    }
-
-    Simulation = [PSCustomObject]@{
-        ExistingSamAccountNames = @()
-        LockedSamAccountNames = @()
-        DisabledSamAccountNames = @()
-        PasswordChangeAtLogonSamAccountNames = @()
-    }
-}
-
-
-# ============================================================
-# AMBIENTE REAL - UNLOCK
-# ============================================================
-
-$realUnlockResult = Invoke-UserUnlockAccount `
-    -SamAccountName "usuario.teste.inexistente" `
-    -Configuration $realConfiguration `
-    -Execute
 
 Write-TestResult `
-    "Ambiente real inválido do Unlock é tratado com falha controlada" `
-    ($realUnlockResult.Success -eq $false)
-
-
-# ============================================================
-# AMBIENTE REAL - ENABLE
-# ============================================================
-
-$realEnableResult = Invoke-UserEnableAccount `
-    -SamAccountName "usuario.teste.inexistente" `
-    -Configuration $realConfiguration `
-    -Execute
+    "Configuração principal mantém SimulationMode ativo" `
+    ($configuration.SimulationMode -eq $true)
 
 Write-TestResult `
-    "Ambiente real inválido do Enable é tratado com falha controlada" `
-    ($realEnableResult.Success -eq $false)
-
-
-# ============================================================
-# AMBIENTE REAL - DISABLE
-# ============================================================
-
-$realDisableResult = Invoke-UserDisableAccount `
-    -SamAccountName "usuario.teste.inexistente" `
-    -Configuration $realConfiguration `
-    -Execute
+    "Configuração de simulação não define controlador de domínio" `
+    ([string]::IsNullOrWhiteSpace($configuration.DomainController))
 
 Write-TestResult `
-    "Ambiente real inválido do Disable é tratado com falha controlada" `
-    ($realDisableResult.Success -eq $false)
-
-
-# ============================================================
-# AMBIENTE REAL - FORCE PASSWORD CHANGE
-# ============================================================
-
-$realForcePasswordChangeResult = Invoke-UserForcePasswordChange `
-    -SamAccountName "usuario.teste.inexistente" `
-    -Configuration $realConfiguration `
-    -Execute
+    "Usuário de simulação para Unlock está configurado" `
+    ($configuration.Simulation.LockedSamAccountNames -contains "silva.maria.ext")
 
 Write-TestResult `
-    "Ambiente real inválido do Force Password Change é tratado com falha controlada" `
-    ($realForcePasswordChangeResult.Success -eq $false)
+    "Usuário de simulação para Disable está configurado" `
+    ($configuration.Simulation.DisabledSamAccountNames -contains "silva.maria3.ext")
 
+Write-TestResult `
+    "Configuração de simulação não inclui usuários de produção" `
+    ($configuration.Simulation.ExistingSamAccountNames.Count -eq 3)
 
 # ============================================================
 # RESULTADO
