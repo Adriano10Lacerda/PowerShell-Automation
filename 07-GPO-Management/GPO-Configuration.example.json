@@ -1,0 +1,21 @@
+{
+  "SimulationMode": true,
+  "ActiveDirectory": {
+    "DomainController": "",
+    "TargetDomain": ""
+  },
+  "GPO": {
+    "DefaultDescription": "Example GPO description",
+    "RequireDescription": true
+  },
+  "Operations": {
+    "CheckGPO": true,
+    "CheckLinks": true,
+    "CreateGPO": true,
+    "ListGPOs": true,
+    "ListLinks": true
+  },
+  "Simulation": {
+    "ExistingGPOs": []
+  }
+}

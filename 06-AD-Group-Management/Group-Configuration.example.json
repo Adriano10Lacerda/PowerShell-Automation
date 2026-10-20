@@ -1,0 +1,22 @@
+{
+  "SimulationMode": true,
+  "ActiveDirectory": {
+    "DomainController": "",
+    "TargetOU": ""
+  },
+  "Group": {
+    "DefaultScope": "Global",
+    "DefaultCategory": "Security",
+    "RequireDescription": true
+  },
+  "Operations": {
+    "CreateGroup": true,
+    "AddMember": true,
+    "RemoveMember": true,
+    "ListMembers": true
+  },
+  "Simulation": {
+    "ExistingGroups": [],
+    "ExistingUsers": []
+  }
+}

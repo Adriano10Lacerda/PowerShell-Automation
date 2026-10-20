@@ -1,0 +1,44 @@
+{
+  "SimulationMode": true,
+  "Reporting": {
+    "IncludeSummary": true,
+    "IncludeDetails": true,
+    "IncludeTimestamp": true
+  },
+  "Output": {
+    "Directory": "./Reports",
+    "Formats": ["JSON", "CSV"]
+  },
+  "Sources": {
+    "ComputerInventory": {
+      "Enabled": false,
+      "Directory": "",
+      "FilePattern": "*.csv",
+      "Formats": ["CSV"]
+    },
+    "ADUsers": {
+      "Enabled": false,
+      "Directory": "",
+      "FilePattern": "*.csv",
+      "Formats": ["CSV"]
+    },
+    "ADGroups": {
+      "Enabled": false,
+      "Directory": "",
+      "FilePattern": "*.csv",
+      "Formats": ["CSV"]
+    },
+    "GPOs": {
+      "Enabled": false,
+      "Directory": "",
+      "FilePattern": "*.csv",
+      "Formats": ["CSV"]
+    },
+    "EntraUsers": {
+      "Enabled": false,
+      "Directory": "",
+      "FilePattern": "*.csv",
+      "Formats": ["CSV"]
+    }
+  }
+}

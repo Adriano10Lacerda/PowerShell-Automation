@@ -302,6 +302,45 @@ if (-not (Test-Path ".\03-AD-User-Provisioning\AD-Configuration.json")) {
 
 Review the configuration and keep `SimulationMode` enabled while testing. Do not commit local domain, server, OU, or other environment-specific settings.
 
+### AD Group Management, GPO Management, and Reporting configuration
+
+Create each local configuration from its example when the local file does not already exist:
+
+```powershell
+$configuracoes = @(
+    @{
+        Example = ".\06-AD-Group-Management\Group-Configuration.example.json"
+        Local   = ".\06-AD-Group-Management\Group-Configuration.json"
+    },
+    @{
+        Example = ".\07-GPO-Management\GPO-Configuration.example.json"
+        Local   = ".\07-GPO-Management\GPO-Configuration.json"
+    },
+    @{
+        Example = ".\08-Reporting\Reporting-Configuration.example.json"
+        Local   = ".\08-Reporting\Reporting-Configuration.json"
+    }
+)
+
+foreach ($config in $configuracoes) {
+    if (-not (Test-Path -LiteralPath $config.Local)) {
+        if (-not (Test-Path -LiteralPath $config.Example)) {
+            throw "Example configuration not found: $($config.Example)"
+        }
+
+        Copy-Item -LiteralPath $config.Example -Destination $config.Local
+        Write-Host "Created: $($config.Local)"
+    }
+    else {
+        Write-Host "Preserved existing configuration: $($config.Local)"
+    }
+}
+```
+
+Review each local configuration before running its module. Keep `SimulationMode` enabled during initial validation. Configure domain controllers, target domains, report sources, paths, and permissions only for your authorized environment. The examples are starting points and must be checked against the module implementation before use.
+
+The local `Group-Configuration.json`, `GPO-Configuration.json`, and `Reporting-Configuration.json` files are excluded from version control. Commit their `.example.json` counterparts, not environment-specific local configurations.
+
 ---
 
 ## Prerequisites and Dependencies
@@ -437,7 +476,7 @@ Implemented and tested in the development environment:
 - Command-line interfaces and a WPF graphical interface
 - Automated tests and Simulation Mode in the relevant workflows
 - Exit-code handling for the Entra ID, GPO, and reporting test scripts
-- Local configuration protection for AD User Provisioning and Computer Inventory
+- Local configuration protection for AD User Provisioning, Computer Inventory, AD Group Management, GPO Management, and Reporting
 
 The test results describe the executed automated test suite. They do not establish that every feature has been validated against live infrastructure. The graphical interface includes informational or disabled real-operation areas, and some tests reported that a default Active Directory Web Services server was unavailable.
 

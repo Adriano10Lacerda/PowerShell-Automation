@@ -18,3 +18,8 @@ __pycache__/
 # Local Computer Inventory configuration and backup
 /05-Computer-Inventory/Inventory-Configuration.json
 /05-Computer-Inventory/Inventory-Configuration.local-backup.json
+
+# Local configurations - AD Group Management, GPO Management and Reporting
+/06-AD-Group-Management/Group-Configuration.json
+/07-GPO-Management/GPO-Configuration.json
+/08-Reporting/Reporting-Configuration.json
