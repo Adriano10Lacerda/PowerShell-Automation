@@ -291,12 +291,12 @@ Write-TestResult `
     )
 
 # ============================================================
-# TESTE 15 - MODULE ACTIVE DIRECTORY INDISPONÍVEL
+# TESTE 15 - CONFIGURAÇÃO AD INDISPONÍVEL
 # ============================================================
 
 $realConfiguration = [PSCustomObject]@{
     Domain           = "BRSPO"
-    DomainController = "dc.invalid.local"
+    DomainController = ""
     SimulationMode   = $false
 
     UserPrincipalName = [PSCustomObject]@{
@@ -316,7 +316,7 @@ $realHandled =
     )
 
 Write-TestResult `
-    "Erro de ambiente real é tratado sem exceção não controlada" `
+    "Indisponibilidade do AD é tratada sem exceção não controlada" `
     $realHandled
 
 # ============================================================
