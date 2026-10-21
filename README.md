@@ -239,6 +239,16 @@ The recorded regression run completed all 19 scripts with exit code 0 and no rep
 
 A subsequent local validation session executed 20 test runs covering 19 unique test scripts. All 695 tests reported across those runs passed, with the Interface test executed twice. This run is separate from the historical regression result of 696 tests shown above. Automated tests do not replace integration, security, or acceptance testing in a real environment.
 
+Additional validation performed on October 21, 2026:
+
+- All 292 tests passed across the 11 numbered module test scripts executed in this validation pass.
+- All 356 tests passed across seven official Core test scripts executed in this validation pass.
+- A separate isolated Computer Core diagnostic passed 20/20 checks using mocked AD/CIM data. This is supplemental validation and is not counted as an official test script.
+- These results come from separate executions and must not be combined with the historical regression totals above as though they were one regression run.
+- The original Computer Core test was not rerun in this pass because it can query real Active Directory and CIM services.
+
+These results document the latest validation performed; they do not replace live integration, security, or acceptance testing.
+
 Some Core tests reported that a default Active Directory server with Active Directory Web Services could not be found. Therefore, successful test results must not be interpreted as proof of live Active Directory, Entra ID, or Group Policy operations.
 
 The GUI test suite validates structure and wiring; it is not a full end-to-end test of real administrative operations.
