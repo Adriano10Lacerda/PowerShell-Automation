@@ -497,6 +497,81 @@ Write-TestResult `
     ($moduleContent -match '"Start-V2PolicyManagement",')
 
 # ============================================================
+# ============================================================
+# GROUP MANAGEMENT - INTERFACE V2
+# ============================================================
+
+Write-TestResult `
+    "Start-V2GroupManagement existe" `
+    ($moduleContent -match 'function Start-V2GroupManagement')
+
+Write-TestResult `
+    "Group Management referencia o módulo Core" `
+    ($moduleContent -match '\.\.\\Core\\Group\\Management\\Group-Management\.psm1')
+
+Write-TestResult `
+    "Group Management verifica a existência do módulo Core" `
+    ($moduleContent -match 'Group Management não encontrado')
+
+Write-TestResult `
+    "Group Management importa o módulo Core" `
+    ($moduleContent -match 'Import-Module')
+
+Write-TestResult `
+    "Group Management carrega a configuração" `
+    ($moduleContent -match 'Get-V2GroupConfiguration')
+
+Write-TestResult `
+    "Group Management consulta grupos" `
+    ($moduleContent -match 'Get-GroupManagement\s+`')
+
+Write-TestResult `
+    "Group Management consulta membros" `
+    ($moduleContent -match 'Get-GroupManagementMembers\s+`')
+
+Write-TestResult `
+    "Inclusão utiliza preview" `
+    ($moduleContent -match 'Get-GroupManagementPreview\s+`(?s).*?-Action "AddMember"')
+
+Write-TestResult `
+    "Remoção utiliza preview" `
+    ($moduleContent -match 'Get-GroupManagementPreview\s+`(?s).*?-Action "RemoveMember"')
+
+Write-TestResult `
+    "Inclusão chama Invoke-GroupAddMember" `
+    ($moduleContent -match 'Invoke-GroupAddMember\s+`')
+
+Write-TestResult `
+    "Remoção chama Invoke-GroupRemoveMember" `
+    ($moduleContent -match 'Invoke-GroupRemoveMember\s+`')
+
+Write-TestResult `
+    "Inclusão utiliza confirmação" `
+    ($moduleContent -match '(?s)function Start-V2GroupAddMember.*?Read-Host.*?Invoke-GroupAddMember')
+
+Write-TestResult `
+    "Remoção utiliza confirmação" `
+    ($moduleContent -match '(?s)function Start-V2GroupRemoveMember.*?Read-Host.*?Invoke-GroupRemoveMember')
+
+Write-TestResult `
+    "Inclusão utiliza -Execute" `
+    ($moduleContent -match '(?s)Invoke-GroupAddMember\s+`.*?-Execute')
+
+Write-TestResult `
+    "Remoção utiliza -Execute" `
+    ($moduleContent -match '(?s)Invoke-GroupRemoveMember\s+`.*?-Execute')
+
+Write-TestResult `
+    "Consulta do grupo é atualizada após ações" `
+    ($moduleContent -match '(?s)Start-V2GroupManagement.*?Start-V2GroupAddMember.*?Get-GroupManagement.*?Start-V2GroupRemoveMember.*?Get-GroupManagement')
+
+Write-TestResult `
+    "Opção 3 do menu chama Start-V2GroupManagement" `
+    ($moduleContent -match '"3"\s*\{\s*Start-V2GroupManagement')
+
+Write-TestResult `
+    "Start-V2GroupManagement está exportada" `
+    ($moduleContent -match '"Start-V2GroupManagement",')
 # PADRÃO DE SEGURANÇA
 # ============================================================
 
