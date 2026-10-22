@@ -244,7 +244,7 @@ Additional validation performed on October 21, 2026:
 - All 292 tests passed across the 11 numbered module test scripts executed in this validation pass.
 - All 356 tests passed across seven official Core test scripts executed in this validation pass.
 - A separate isolated Computer Core diagnostic passed 20/20 checks using mocked AD/CIM data. This is supplemental validation and is not counted as an official test script.
-- A separate Computer Core test draft passed 49/49 assertions using mocked AD/CIM data on October 22, 2026. This is supplemental isolated validation, not a live integration test and not an official test-script result.
+- A supplemental Computer Core test draft was reviewed on October 22, 2026. Its AD/CIM mocks are defined inside the module scope, while later calls to `Get-ComputerCimInfo` and `Get-ComputerInventory` occur outside that scope. Therefore, the draft is not confirmed to be fully isolated and its reported 49/49 assertions are not counted as official isolated test results.
 - These results come from separate executions and must not be combined with the historical regression totals above as though they were one regression run.
 - The original Computer Core test was not rerun in this pass because it can query real Active Directory and CIM services.
 
