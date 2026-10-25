@@ -72,69 +72,23 @@ function Get-Configuration
     }
     else
     {
-        # Tokens de data/hora permitidos pelo projeto
-        $TokensDataPermitidos = @(
-            "d",
-            "dd",
-            "ddd",
-            "dddd",
-            "f",
-            "ff",
-            "fff",
-            "ffff",
-            "fffff",
-            "ffffff",
-            "fffffff",
-            "F",
-            "FF",
-            "FFF",
-            "FFFF",
-            "FFFFF",
-            "FFFFFF",
-            "FFFFFFF",
-            "g",
-            "gg",
-            "h",
-            "hh",
-            "H",
-            "HH",
-            "K",
-            "m",
-            "mm",
-            "M",
-            "MM",
-            "MMM",
-            "MMMM",
-            "s",
-            "ss",
-            "t",
-            "tt",
-            "y",
-            "yy",
-            "yyy",
-            "yyyy",
-            "yyyyy",
-            "yyyyyy",
-            "yyyyyyy",
-            "z",
-            "zz",
-            "zzz"
+        # Formatos de data permitidos pela V1
+        $FormatosDataPermitidos = @(
+            "ddMM",
+            "dd/MM/yyyy",
+            "yyyy-MM-dd"
         )
 
         $FormatoDataValido = $false
 
-        foreach ($Token in $TokensDataPermitidos)
+        if ($Config.FormatoData -cin $FormatosDataPermitidos)
         {
-            if ($Config.FormatoData -match [regex]::Escape($Token))
-            {
-                $FormatoDataValido = $true
-                break
-            }
+            $FormatoDataValido = $true
         }
 
         if (-not $FormatoDataValido)
         {
-            $Erros += "O campo FormatoData nao possui um token de data valido."
+            $Erros += "O campo FormatoData deve utilizar um dos formatos permitidos: ddMM, dd/MM/yyyy ou yyyy-MM-dd."
         }
         else
         {
