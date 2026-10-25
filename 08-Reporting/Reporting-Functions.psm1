@@ -54,25 +54,24 @@ function Test-ReportingConfiguration {
                 $Errors += "A propriedade 'Enabled' não foi definida para a fonte '$SourceName'."
             }
 
-            if ([string]::IsNullOrWhiteSpace($Source.Directory)) {
+            if ($Source.Enabled -eq $true) {
 
-                $Errors += "O diretório não foi definido para a fonte '$SourceName'."
-            }
+                if ([string]::IsNullOrWhiteSpace($Source.Directory)) {
+                    $Errors += "O diretório não foi definido para a fonte '$SourceName'."
+                }
 
-            if ([string]::IsNullOrWhiteSpace($Source.FilePattern)) {
+                if ([string]::IsNullOrWhiteSpace($Source.FilePattern)) {
+                    $Errors += "O 'FilePattern' não foi definido para a fonte '$SourceName'."
+                }
 
-                $Errors += "O 'FilePattern' não foi definido para a fonte '$SourceName'."
-            }
-
-            if ($null -eq $Source.Formats -or @($Source.Formats).Count -eq 0) {
-
-                $Errors += "Nenhum formato foi definido para a fonte '$SourceName'."
+                if ($null -eq $Source.Formats -or @($Source.Formats).Count -eq 0) {
+                    $Errors += "Nenhum formato foi definido para a fonte '$SourceName'."
+                }
             }
         }
     }
 
     if ($Errors.Count -gt 0) {
-
         throw ($Errors -join "`n")
     }
 
@@ -124,7 +123,7 @@ function Get-ReportingSourceFiles {
         $AllowedFormats = @(
             $Source.Formats |
                 ForEach-Object {
-                    $_.ToString().ToLower()
+                    "." + $_.ToString().TrimStart(".").ToLowerInvariant()
                 }
         )
 
@@ -479,3 +478,4 @@ Export-ModuleMember -Function `
     New-ReportingDataset,
     Export-ReportingDataset,
     Invoke-Reporting
+
