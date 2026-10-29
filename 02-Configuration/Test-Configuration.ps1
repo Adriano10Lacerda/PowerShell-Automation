@@ -174,6 +174,52 @@ try {
         Assert-ConfigurationThrows -Caminho $Caminho
     }
 
+        # 10. Formatos de data permitidos pela V1
+
+    Invoke-Test "Formato ddMM é aceito" {
+        $Caminho = New-TestConfiguration @{
+            FormatoData = "ddMM"
+        }
+
+        $Config = Get-Configuration -ConfigurationPath $Caminho
+
+        if ($Config.FormatoData -ne "ddMM") {
+            throw "O formato ddMM não foi preservado."
+        }
+    }
+
+    Invoke-Test "Formato dd/MM/yyyy é aceito" {
+        $Caminho = New-TestConfiguration @{
+            FormatoData = "dd/MM/yyyy"
+        }
+
+        $Config = Get-Configuration -ConfigurationPath $Caminho
+
+        if ($Config.FormatoData -ne "dd/MM/yyyy") {
+            throw "O formato dd/MM/yyyy não foi preservado."
+        }
+    }
+
+    Invoke-Test "Formato yyyy-MM-dd é aceito" {
+        $Caminho = New-TestConfiguration @{
+            FormatoData = "yyyy-MM-dd"
+        }
+
+        $Config = Get-Configuration -ConfigurationPath $Caminho
+
+        if ($Config.FormatoData -ne "yyyy-MM-dd") {
+            throw "O formato yyyy-MM-dd não foi preservado."
+        }
+    }
+
+    Invoke-Test "Formato xyz é rejeitado" {
+        $Caminho = New-TestConfiguration @{
+            FormatoData = "xyz"
+        }
+
+        Assert-ConfigurationThrows -Caminho $Caminho
+    }
+
     # 10. Caracteres especiais vazios
     Invoke-Test "Caracteres especiais vazios são rejeitados" {
         $Caminho = New-TestConfiguration @{
