@@ -438,9 +438,14 @@ PowerShell-Automation/
 ├── 10-Interface-V2/
 ├── 11-Interface-GUI/
 ├── Core/
+│   ├── AD/
 │   ├── Audit/
+│   ├── BitLocker/
 │   ├── Computer/
+│   ├── Configuration/
 │   ├── Group/
+│   ├── Logging/
+│   ├── Security/
 │   └── User/
 ├── docs/
 ├── .gitignore
