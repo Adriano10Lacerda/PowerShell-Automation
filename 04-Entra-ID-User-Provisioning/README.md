@@ -252,7 +252,10 @@ No modo de simulação, retorna um resultado indicando que o usuário foi prepar
 
 No modo real, utiliza `New-MgUser` para criar o usuário no Microsoft Entra ID.
 
-
+A criação real exige `-AllowRealOperation` explicitamente e passa por `ShouldProcess`.
+Chamadas diretas podem usar `-WhatIf` para validar o fluxo sem consultar ou alterar o tenant
+e `-Confirm` para confirmar a operação. O script interativo só autoriza a chamada após a
+confirmação explícita do usuário.
 
 A senha inicial é solicitada durante a operação. O módulo configura a troca de senha no próximo login e não armazena a senha inicial. Os dados temporários utilizados no processamento são limpos ao final da operação.
 
@@ -341,8 +344,8 @@ Antes da execução, é necessário:
 - Conferir os dados do usuário.
 
 - Confirmar explicitamente a operação.
-
-
+- Chamar `New-EntraUserProvision` com `-AllowRealOperation`; operações diretas também
+  respeitam `-WhatIf` e `-Confirm`.
 
 **Atenção:** o modo real pode criar um usuário no tenant configurado. Utilize-o somente em um ambiente autorizado e após revisar os parâmetros da operação.
 
@@ -389,7 +392,9 @@ A suíte contempla testes de:
 - Validação de Tenant ID e domínio.
 
 - Valores inválidos de `SimulationMode`.
-
+- Bloqueio de SimulationMode ausente/não Boolean na consulta ao Graph.
+- Bloqueio de provisionamento sem `-AllowRealOperation`.
+- Bloqueio de consultas e criação no modo `-WhatIf`.
 - Criação e falhas utilizando mocks do Microsoft Graph.
 
 
@@ -402,17 +407,16 @@ A suíte contempla testes de:
 
 |---|---:|
 
-| Total de testes | 29 |
-
-| Testes aprovados | 29 |
-
+| Total de testes | 35 |
+| Testes aprovados | 35 |
 | Testes reprovados | 0 |
-
 | Taxa de aprovação | 100% |
 
 
 
-**Status: todos os testes passaram.**
+**Status: todos os 35 testes passaram** em PowerShell 7.6.9. Os testes usam mocks fail-closed
+para os casos de autorização e mocks do Microsoft Graph nos cenários de criação; nenhum tenant
+real foi acessado.
 
 
 
@@ -441,7 +445,6 @@ Os testes foram executados em ambiente de simulação, incluindo cenários com m
 
 
 Demonstrar uma abordagem estruturada para provisionamento de usuários no Microsoft Entra ID, com validação de dados, controle de duplicidade, simulação, confirmação explícita e pós-validação da operação.
-
 
 
 

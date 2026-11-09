@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $ScriptPath = $PSScriptRoot
 $ModulePath = Join-Path $ScriptPath "Group-Functions.psm1"
-$ConfigPath = Join-Path $ScriptPath "Group-Configuration.json"
+$ADGroupModule = $null
 
 $TestsPassed = 0
 $TestsFailed = 0
@@ -30,6 +30,10 @@ function Test-Result {
 
         & $Test
 
+        if ($null -ne $script:ADGroupModule -and $script:IsolationStubsVerified -eq $true) {
+            Assert-ADGroupExternalCallCountsZero -Scenario $TestName
+        }
+
         Write-Host "[PASS] $TestName" -ForegroundColor Green
         $script:TestsPassed++
     }
@@ -48,6 +52,7 @@ Write-Host "     Testes - AD Group Management" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
 
+try {
 
 # ============================================================
 # Teste 1 - Arquivo do módulo
@@ -64,26 +69,171 @@ Test-Result `
 
 
 # ============================================================
-# Teste 2 - Arquivo de configuração
+# Preparar configuração e stubs isolados
 # ============================================================
 
-Test-Result `
-    -TestName "Arquivo Group-Configuration.json encontrado" `
-    -Test {
+$Configuration = [PSCustomObject]@{
+    SimulationMode = $true
+    ActiveDirectory = [PSCustomObject]@{
+        DomainController = ""
+        TargetOU         = ""
+    }
+    Group = [PSCustomObject]@{
+        DefaultScope     = "Global"
+        DefaultCategory  = "Security"
+        RequireDescription = $true
+    }
+    Operations = [PSCustomObject]@{
+        CreateGroup  = $true
+        AddMember    = $true
+        RemoveMember = $true
+        ListMembers  = $true
+        CheckGroup   = $true
+    }
+    Simulation = [PSCustomObject]@{
+        ExistingGroups = @(
+            [PSCustomObject]@{
+                Name    = "TI-Suporte"
+                Members = @("maria.santos")
+            },
+            [PSCustomObject]@{
+                Name    = "TI-Infraestrutura"
+                Members = @("carlos.oliveira")
+            },
+            [PSCustomObject]@{
+                Name    = "TI-Seguranca"
+                Members = @()
+            }
+        )
+        ExistingUsers = @("joao.silva", "maria.santos", "carlos.oliveira")
+    }
+}
 
-        if (-not (Test-Path $ConfigPath)) {
-            throw "O arquivo Group-Configuration.json não foi encontrado."
+$ADGroupModule = Import-Module $ModulePath -Force -PassThru -ErrorAction Stop
+
+& $ADGroupModule {
+    $script:ADGroupExternalCallCounts = [ordered]@{
+        GetADDomain = 0
+        GetADGroup = 0
+        GetADGroupMember = 0
+        NewADGroup = 0
+        AddADGroupMember = 0
+        RemoveADGroupMember = 0
+        GetModule = 0
+        ImportModule = 0
+    }
+
+    function script:Get-ADDomain {
+        $script:ADGroupExternalCallCounts.GetADDomain++
+        throw "AD_GROUP_ISOLATION_STUB:Get-ADDomain foi chamado inesperadamente."
+    }
+
+    function script:Get-ADGroup {
+        $script:ADGroupExternalCallCounts.GetADGroup++
+        throw "AD_GROUP_ISOLATION_STUB:Get-ADGroup foi chamado inesperadamente."
+    }
+
+    function script:Get-ADGroupMember {
+        $script:ADGroupExternalCallCounts.GetADGroupMember++
+        throw "AD_GROUP_ISOLATION_STUB:Get-ADGroupMember foi chamado inesperadamente."
+    }
+
+    function script:New-ADGroup {
+        $script:ADGroupExternalCallCounts.NewADGroup++
+        throw "AD_GROUP_ISOLATION_STUB:New-ADGroup foi chamado inesperadamente."
+    }
+
+    function script:Add-ADGroupMember {
+        $script:ADGroupExternalCallCounts.AddADGroupMember++
+        throw "AD_GROUP_ISOLATION_STUB:Add-ADGroupMember foi chamado inesperadamente."
+    }
+
+    function script:Remove-ADGroupMember {
+        $script:ADGroupExternalCallCounts.RemoveADGroupMember++
+        throw "AD_GROUP_ISOLATION_STUB:Remove-ADGroupMember foi chamado inesperadamente."
+    }
+
+    function script:Get-Module {
+        $script:ADGroupExternalCallCounts.GetModule++
+        throw "AD_GROUP_ISOLATION_STUB:Get-Module foi chamado inesperadamente."
+    }
+
+    function script:Import-Module {
+        $script:ADGroupExternalCallCounts.ImportModule++
+        throw "AD_GROUP_ISOLATION_STUB:Import-Module foi chamado inesperadamente."
+    }
+}
+
+$IsolationStubsVerified = & $ADGroupModule {
+    $RequiredStubNames = @(
+        "Get-ADDomain",
+        "Get-ADGroup",
+        "Get-ADGroupMember",
+        "New-ADGroup",
+        "Add-ADGroupMember",
+        "Remove-ADGroupMember",
+        "Get-Module",
+        "Import-Module"
+    )
+
+    foreach ($StubName in $RequiredStubNames) {
+        $ResolvedCommand = Get-Command `
+            -Name $StubName `
+            -CommandType Function `
+            -ErrorAction Stop
+
+        if ($ResolvedCommand.ScriptBlock.ToString() -notlike "*AD_GROUP_ISOLATION_STUB:$StubName*") {
+            throw "O comando '$StubName' não está resolvido para o stub fail-closed obrigatório."
         }
     }
 
+    $true
+}
+
+if ($IsolationStubsVerified -ne $true) {
+    throw "A suíte foi interrompida porque os stubs isolados não puderam ser comprovados."
+}
+
+function Get-ADGroupExternalCallCounts {
+    & $ADGroupModule {
+        return $script:ADGroupExternalCallCounts
+    }
+}
+
+function Assert-ADGroupExternalCallCountsZero {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Scenario
+    )
+
+    $Counts = Get-ADGroupExternalCallCounts
+    foreach ($Name in $Counts.Keys) {
+        if ($Counts[$Name] -ne 0) {
+            throw "A fronteira externa '$Name' foi chamada durante '$Scenario' ($($Counts[$Name]) chamada(s))."
+        }
+    }
+}
+
 
 # ============================================================
-# Carregar módulo e configuração
+# Teste 2 - Configuração isolada em memória
 # ============================================================
 
-Import-Module $ModulePath -Force
+Test-Result `
+    -TestName "Configuração de teste em memória disponível" `
+    -Test {
 
-$Configuration = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+        if ($Configuration.SimulationMode -isnot [bool] -or -not $Configuration.SimulationMode) {
+            throw "A configuração isolada deve manter SimulationMode=True."
+        }
+
+        foreach ($OperationName in @("CreateGroup", "AddMember", "RemoveMember", "ListMembers", "CheckGroup")) {
+            $OperationFlag = $Configuration.Operations.PSObject.Properties[$OperationName]
+            if ($null -eq $OperationFlag -or $OperationFlag.Value -isnot [bool] -or -not $OperationFlag.Value) {
+                throw "A flag '$OperationName' deve estar explicitamente habilitada na configuração de teste."
+            }
+        }
+    }
 
 
 # ============================================================
@@ -527,6 +677,68 @@ Test-Result `
 
 
 # ============================================================
+# Testes 20-22 - WhatIf recusa mutações sem chamadas externas
+# ============================================================
+
+Test-Result `
+    -TestName "WhatIf recusa criação sem chamadas externas" `
+    -Test {
+
+        $Result = Invoke-ADGroupManagement `
+            -Operation CreateGroup `
+            -Configuration $Configuration `
+            -GroupName "TI-WhatIf-Create" `
+            -Description "Criação cancelada" `
+            -WhatIf
+
+        if ($Result.Success -ne $false) {
+            throw "WhatIf deveria recusar a criação do grupo."
+        }
+    }
+
+Test-Result `
+    -TestName "WhatIf recusa inclusão sem chamadas externas" `
+    -Test {
+
+        $Result = Invoke-ADGroupManagement `
+            -Operation AddMember `
+            -Configuration $Configuration `
+            -GroupName "TI-Suporte" `
+            -UserName "joao.silva" `
+            -WhatIf
+
+        if ($Result.Success -ne $false) {
+            throw "WhatIf deveria recusar a inclusão do membro."
+        }
+    }
+
+Test-Result `
+    -TestName "WhatIf recusa remoção sem chamadas externas" `
+    -Test {
+
+        $Result = Invoke-ADGroupManagement `
+            -Operation RemoveMember `
+            -Configuration $Configuration `
+            -GroupName "TI-Suporte" `
+            -UserName "maria.santos" `
+            -WhatIf
+
+        if ($Result.Success -ne $false) {
+            throw "WhatIf deveria recusar a remoção do membro."
+        }
+    }
+
+Test-Result `
+    -TestName "Nenhuma fronteira externa foi chamada" `
+    -Test {
+
+        $Counts = Get-ADGroupExternalCallCounts
+        Assert-ADGroupExternalCallCountsZero -Scenario "regressão AD Group completa"
+        Write-Host ("Contadores externos AD Group: " + (($Counts.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ", "))
+    }
+
+
+# ============================================================
 # Resumo
 # ============================================================
 
@@ -550,4 +762,10 @@ else {
     Write-Host "STATUS: EXISTEM TESTES COM FALHA" -ForegroundColor Red
 
     throw "O conjunto de testes possui $TestsFailed falha(s)."
+}
+}
+finally {
+    if ($null -ne $ADGroupModule) {
+        Remove-Module -ModuleInfo $ADGroupModule -Force -ErrorAction Stop
+    }
 }

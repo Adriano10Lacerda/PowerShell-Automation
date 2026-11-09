@@ -23,24 +23,56 @@ if (-not (Test-Path -LiteralPath $modelsPath)) {
 . $modelsPath
 
 function Test-UserADExists {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
         [string]$SamAccountName,
 
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
 
     $result = [PSCustomObject]@{
         Success = $false
         Data    = $false
         Error   = $null
+        QueryStatus = "NotQueried"
     }
 
     if ([string]::IsNullOrWhiteSpace($SamAccountName)) {
         $result.Error = "O SamAccountName é obrigatório para realizar a consulta."
+        return $result
+    }
+
+    if ($null -eq $Configuration.PSObject.Properties['SimulationMode'] -or $Configuration.SimulationMode -isnot [bool]) {
+        $result.Error = 'SimulationMode deve ser definido explicitamente como Boolean.'
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue 'Error'
+        return $result
+    }
+
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        $result.Error = 'Configuração contraditória: SimulationMode não pode ser combinado com AllowRealRead.'
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue 'Error'
+        return $result
+    }
+
+    if ($Preview -or $WhatIfPreference) {
+        $result.Data = $null
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue 'Preview'
+        $result | Add-Member -NotePropertyName IsSimulated -NotePropertyValue $false
+        return $result
+    }
+
+    if (-not $Configuration.SimulationMode -and -not $AllowRealRead) {
+        $result.Error = 'Consulta real bloqueada. Informe -AllowRealRead explicitamente. AllowRealOperation não concede autorização de leitura.'
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue 'Error'
         return $result
     }
 
@@ -49,6 +81,7 @@ function Test-UserADExists {
     # ============================================================
 
     if ($Configuration.SimulationMode -eq $true) {
+        $result.QueryStatus = "Found"
 
         $existingNames = @()
 
@@ -67,6 +100,8 @@ function Test-UserADExists {
             Success = $true
             Data    = $exists
             Error   = $null
+            QueryStatus = "Simulation"
+            IsSimulated = $true
         }
     }
 
@@ -96,47 +131,63 @@ function Test-UserADExists {
             ActiveDirectory `
             -ErrorAction Stop
 
-        Get-ADUser `
+        $adUser = Get-ADUser `
             -Identity $SamAccountName `
             -Server $Configuration.DomainController `
-            -ErrorAction Stop | Out-Null
+            -ErrorAction Stop
+
+        if ($null -eq $adUser) {
+            $result.Success = $true
+            $result.Data = $false
+            $result.QueryStatus = "NotFound"
+            return $result
+        }
 
         $result.Success = $true
         $result.Data = $true
-
-        return $result
-    }
-    catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
-
-        $result.Success = $true
-        $result.Data = $false
+        $result.QueryStatus = "Found"
 
         return $result
     }
     catch {
 
+        if ($_.Exception.GetType().FullName -eq 'Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException') {
+            $result.Success = $true
+            $result.Data = $false
+            $result.QueryStatus = "NotFound"
+            return $result
+        }
+
         $result.Error = `
             "Não foi possível consultar o usuário '$SamAccountName'. Detalhes: $($_.Exception.Message)"
+        $result.QueryStatus = "Error"
 
         return $result
     }
 }
 
 function Get-UserADInfo {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
         [string]$SamAccountName,
 
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
 
     $result = [PSCustomObject]@{
         Success = $false
         Data    = $null
         Error   = $null
+        QueryStatus = "NotQueried"
     }
 
     if ([string]::IsNullOrWhiteSpace($SamAccountName)) {
@@ -147,11 +198,37 @@ function Get-UserADInfo {
         return $result
     }
 
+    if ($null -eq $Configuration.PSObject.Properties['SimulationMode'] -or $Configuration.SimulationMode -isnot [bool]) {
+        $result.Error = 'SimulationMode deve ser definido explicitamente como Boolean.'
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue 'Error'
+        return $result
+    }
+
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        $result.Error = 'Configuração contraditória: SimulationMode não pode ser combinado com AllowRealRead.'
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue 'Error'
+        return $result
+    }
+
+    if ($Preview -or $WhatIfPreference) {
+        $result.Data = $null
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue 'Preview'
+        $result | Add-Member -NotePropertyName IsSimulated -NotePropertyValue $false
+        return $result
+    }
+
+    if (-not $Configuration.SimulationMode -and -not $AllowRealRead) {
+        $result.Error = 'Consulta real bloqueada. Informe -AllowRealRead explicitamente. AllowRealOperation não concede autorização de leitura.'
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue 'Error'
+        return $result
+    }
+
     # ============================================================
     # SIMULATION MODE
     # ============================================================
 
     if ($Configuration.SimulationMode -eq $true) {
+        $result.QueryStatus = "Simulation"
 
         $existsResult = Test-UserADExists `
             -SamAccountName $SamAccountName `
@@ -195,6 +272,7 @@ function Get-UserADInfo {
 
         $result.Success = $true
         $result.Data = $user
+        $result.QueryStatus = "Simulation"
 
         return $result
     }
@@ -251,6 +329,14 @@ function Get-UserADInfo {
                 whenChanged,
                 MemberOf `
             -ErrorAction Stop
+
+        if ($null -eq $adUser) {
+            $result.Success = $false
+            $result.Data = $null
+            $result.Error = $null
+            $result.QueryStatus = "NotFound"
+            return $result
+        }
 
         $user = New-UserModel
 
@@ -314,20 +400,23 @@ function Get-UserADInfo {
 
         $result.Success = $true
         $result.Data = $user
-
-        return $result
-    }
-    catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
-
-        $result.Error = `
-            "Usuário '$SamAccountName' não encontrado no Active Directory."
+        $result.QueryStatus = "Found"
 
         return $result
     }
     catch {
 
+        if ($_.Exception.GetType().FullName -eq 'Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException') {
+            $result.Success = $false
+            $result.Data = $null
+            $result.Error = $null
+            $result.QueryStatus = "NotFound"
+            return $result
+        }
+
         $result.Error = `
             "Não foi possível consultar o usuário '$SamAccountName'. Detalhes: $($_.Exception.Message)"
+        $result.QueryStatus = "Error"
 
         return $result
     }

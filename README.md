@@ -226,18 +226,22 @@ The public repository is designed to contain examples and source code without ex
 
 ## Automated Testing
 
-The project contains 19 unique automated test scripts covering the numbered modules, interfaces, and reusable Core components.
+The repository currently tracks 22 `Test-*.ps1` files. This includes the 19-script historical baseline documented below and three supplemental Computer/Core scripts; they are not all equivalent or safe to run without reviewing their isolation.
 
-| Test area | Scripts | Tests passed |
+| Historical test area | Scripts | Tests recorded |
 |---|---:|---:|
 | Modules 01–09 | 9 | 190 |
 | Interfaces 10–11 | 2 | 102 |
 | Core components | 8 | 404 |
 | **Total** | **19** | **696** |
 
-The recorded regression run completed all 19 scripts with exit code 0 and no reported test failures. The three test scripts for Entra ID provisioning, GPO management, and reporting were also updated to return exit code 1 when their failure counter is greater than zero. Controlled failure tests confirmed this behavior.
+These are historical results recorded in this README, not results from the current validation pass. No raw transcript for the 696-test run is checked into the repository. The three test scripts for Entra ID provisioning, GPO management, and reporting have exit-code handling for nonzero failure counters.
 
-A subsequent local validation session executed 20 test runs covering 19 unique test scripts. All 695 tests reported across those runs passed, with the Interface test executed twice. This run is separate from the historical regression result of 696 tests shown above. Automated tests do not replace integration, security, or acceptance testing in a real environment.
+A later README entry records 20 test runs over 19 unique scripts and 695 passing checks, with the Interface test run twice. That is a separate historical result and is not combined with the 696-test record above.
+
+The November 5, 2026 records of 17 scripts/656 checks and 18 scripts/667 checks remain unreconciled because their raw transcripts are unavailable; they are historical and must not be combined as one regression. Mission 48 separately recorded Entra provisioning at 35/35 and Computer Management at 67/67 under PowerShell 7.6.9 with external calls stubbed. Mission 49 then ran the corrected Computer Inventory Core logic test at 20/20 under PowerShell 7.6.5 using AST-loaded pure helpers and in-memory AD/CIM fixtures. The full Configuration, Reporting, and Computer Inventory suites remain unexecuted in Mission 49 because safe confinement of their file writes and recursive cleanup was not proven. PowerShell 7 is the official V1 runtime requirement; PowerShell 5.1 received static analysis only and is not promised as a supported runtime. See the [V1 completion report](./docs/V1-Completion-Report.md) for evidence, scope, limitations, and release blockers.
+
+Automated tests do not replace integration, security, or acceptance testing in an authorized environment.
 
 Additional validation performed on October 21, 2026:
 
@@ -438,15 +442,16 @@ PowerShell-Automation/
 ├── 10-Interface-V2/
 ├── 11-Interface-GUI/
 ├── Core/
-│   ├── AD/
 │   ├── Audit/
-│   ├── BitLocker/
 │   ├── Computer/
-│   ├── Configuration/
+│   │   └── Management/
 │   ├── Group/
-│   ├── Logging/
-│   ├── Security/
+│   │   └── Management/
 │   └── User/
+│       ├── Actions/
+│       └── Management/
+├── Validation/
+│   └── Missao28/
 ├── docs/
 ├── .gitignore
 ├── LICENSE
@@ -483,22 +488,15 @@ Individual modules can also be executed directly from their respective directori
 
 ## Current Status
 
-The project has 11 numbered modules and interfaces, reusable components under Core, and a recorded regression result of 696 passing tests across 19 unique scripts.
+V1 remains under technical review. The repository has 11 numbered module/interface folders, reusable components under Core, and 22 tracked `Test-*.ps1` files. Historical test totals are not equivalent to a current full regression.
 
-Implemented and tested in the development environment:
-- Password generation and configuration validation
-- AD and Entra ID provisioning workflows
-- Computer inventory, group management, GPO management, and reporting
-- Command-line interfaces and a WPF graphical interface
-- Automated tests and Simulation Mode in the relevant workflows
-- Exit-code handling for the Entra ID, GPO, and reporting test scripts
-- Local configuration protection for AD User Provisioning, Computer Inventory, AD Group Management, GPO Management, and Reporting
+Current targeted test results and identified security/documentation gaps are maintained in the [V1 completion report](./docs/V1-Completion-Report.md).
 
 The test results describe the executed automated test suite. They do not establish that every feature has been validated against live infrastructure. The graphical interface includes informational or disabled real-operation areas, and some tests reported that a default Active Directory Web Services server was unavailable.
 
 Before production use, validate configuration, permissions, connectivity, security controls, and the expected behavior in an authorized test environment.
 
-Version 1 should be considered ready for release only after the remaining documentation, repository, security, and integration-readiness checks have been reviewed.
+Do not treat Version 1 as production-ready until the high-risk findings and pending Core/Computer, VM, and infrastructure validation in the report are resolved.
 
 ---
 

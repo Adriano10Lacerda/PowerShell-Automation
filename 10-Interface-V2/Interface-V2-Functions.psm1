@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 # ============================================================
 # FUNÇÕES GERAIS
@@ -37,6 +37,17 @@ function Pause-V2 {
 
     Write-Host ""
     Read-Host "Pressione ENTER para continuar"
+}
+
+function Request-V2OneTimeAuthorization {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [ValidateSet('Read', 'Write')] [string]$Kind,
+        [Parameter(Mandatory)] [string]$Target
+    )
+    $phrase = if ($Kind -eq 'Read') { 'AUTORIZAR LEITURA' } else { 'AUTORIZAR ALTERAÇÃO' }
+    $response = Read-Host "Para autorizar somente esta operação ($Kind) em '$Target', digite '$phrase'"
+    return ($response -ceq $phrase)
 }
 
 
@@ -97,6 +108,50 @@ function Get-V2BitLockerColor {
 }
 
 
+function Resolve-V2ComputerSummaryState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][PSCustomObject]$Summary)
+
+    $modeMessage = $null
+    if ($Summary.Mode -eq "Simulation" -or ($Summary.IsSimulated -and -not $Summary.Preview)) {
+        $modeMessage = "Dados demonstrativos fictícios; nenhuma consulta foi realizada."
+    }
+    elseif ($Summary.Mode -eq "Preview" -or $Summary.Preview) {
+        $modeMessage = "Pré-visualização; nenhuma consulta foi realizada e nenhum inventário é apresentado."
+    }
+
+    $collectionMessage = $null
+    if ($Summary.CollectionStatus -eq "Partial") {
+        $collectionMessage = "Coleta parcial; alguns dados ou consultas falharam."
+    }
+    elseif ($Summary.CollectionStatus -eq "Error" -or $Summary.Status -eq "Error") {
+        $collectionMessage = "A coleta falhou; os estados desconhecidos não representam ausência ou desconexão."
+    }
+
+    $adMessage = switch ([string]$Summary.ADQueryStatus) {
+        "Found" { if ($Summary.ADFound -eq $true) { "Sim" } else { "Estado inconsistente" } }
+        "NotFound" { "Não" }
+        "NotQueried" { "Não consultado" }
+        "Error" { "Erro na consulta" }
+        default { if ($Summary.IsSimulated -or $Summary.Preview) { "Não consultado" } else { "Estado desconhecido" } }
+    }
+    $connectivityMessage = switch ([string]$Summary.ConnectivityStatus) {
+        "Responded" { "Sim" }
+        "NoResponse" { "Sem resposta confirmada" }
+        "NotQueried" { "Não consultado" }
+        "Error" { "Erro na consulta" }
+        default { if ($Summary.IsSimulated -or $Summary.Preview) { "Não consultado" } else { "Estado desconhecido" } }
+    }
+
+    [PSCustomObject]@{
+        ModeMessage = $modeMessage
+        CollectionMessage = $collectionMessage
+        ADMessage = $adMessage
+        ConnectivityMessage = $connectivityMessage
+    }
+}
+
+
 function Show-V2ComputerSummary {
     [CmdletBinding()]
     param(
@@ -114,6 +169,8 @@ function Show-V2ComputerSummary {
 
     Write-Host "  STATUS" -ForegroundColor DarkCyan
 
+    $displayState = Resolve-V2ComputerSummaryState -Summary $Summary
+
     $statusColor = Get-V2StatusColor `
         -Status ([string]$Summary.Status)
 
@@ -121,38 +178,34 @@ function Show-V2ComputerSummary {
         "  $($Summary.Status)" `
         -ForegroundColor $statusColor
 
+    if ($displayState.ModeMessage) { Write-Host "  $($displayState.ModeMessage)" -ForegroundColor Yellow }
+    if ($displayState.CollectionMessage) { Write-Host "  $($displayState.CollectionMessage)" -ForegroundColor Yellow }
+
     Write-Host ""
 
     Write-Host "  ACTIVE DIRECTORY" -ForegroundColor DarkCyan
 
-    if ($Summary.ADFound) {
-        Write-Host "  Encontrado   : Sim" -ForegroundColor Green
-    }
-    else {
-        Write-Host "  Encontrado   : Não" -ForegroundColor Yellow
-    }
+    $adColor = if ($displayState.ADMessage -eq "Sim") { "Green" } elseif ($displayState.ADMessage -eq "Erro na consulta") { "Red" } else { "Yellow" }
+    Write-Host "  Encontrado   : $($displayState.ADMessage)" -ForegroundColor $adColor
 
     Write-Host ""
 
     Write-Host "  CONECTIVIDADE" -ForegroundColor DarkCyan
 
-    if ($Summary.Reachable) {
-        Write-Host "  Acessível    : Sim" -ForegroundColor Green
-    }
-    else {
-        Write-Host "  Acessível    : Não" -ForegroundColor Red
-    }
+    $connectivityColor = if ($displayState.ConnectivityMessage -eq "Sim") { "Green" } elseif ($displayState.ConnectivityMessage -in @("Sem resposta confirmada", "Erro na consulta")) { "Red" } else { "Yellow" }
+    Write-Host "  Acessível    : $($displayState.ConnectivityMessage)" -ForegroundColor $connectivityColor
 
     Write-Host ""
 
     Write-Host "  SISTEMA OPERACIONAL" -ForegroundColor DarkCyan
-    Write-Host "  $($Summary.OperatingSystem)" -ForegroundColor White
+    if ($null -eq $Summary.OperatingSystem) { Write-Host "  Não coletado (modo sem I/O)" -ForegroundColor Gray }
+    else { Write-Host "  $($Summary.OperatingSystem)" -ForegroundColor White }
     Write-Host ""
 
     Write-Host "  HARDWARE" -ForegroundColor DarkCyan
-    Write-Host "  Modelo       : $($Summary.Model)"
-    Write-Host "  Processador  : $($Summary.Processor)"
-    Write-Host "  Memória      : $($Summary.MemoryGB) GB"
+    Write-Host "  Modelo       : $(if ($null -eq $Summary.Model) { 'Não coletado' } else { $Summary.Model })"
+    Write-Host "  Processador  : $(if ($null -eq $Summary.Processor) { 'Não coletado' } else { $Summary.Processor })"
+    Write-Host "  Memória      : $(if ($null -eq $Summary.MemoryGB) { 'Não coletada' } else { "$($Summary.MemoryGB) GB" })"
     Write-Host ""
 
     Write-Host "  BITLOCKER" -ForegroundColor DarkCyan
@@ -217,7 +270,17 @@ function Show-V2ComputerDetails {
         "Processor",
         "BitLockerStatus",
         "ErrorCount",
-        "SimulationMode"
+        "SimulationMode",
+        "Preview",
+        "Mode",
+        "Cancelled",
+        "IsSimulated",
+        "Success",
+        "CollectionStatus",
+        "ADQueryStatus",
+        "ConnectivityStatus",
+        "QueryStatus",
+        "Errors"
     )
 
     foreach ($property in $properties) {
@@ -274,12 +337,32 @@ function Start-V2ComputerManagement {
 
     $hostname = $hostname.Trim()
 
+    $nextMode = "Simulation"
     do {
 
         try {
 
-            $summary = Get-ComputerManagementSummary `
-                -Hostname $hostname
+            $summaryArguments = @{ Hostname = $hostname }
+            if ($nextMode -eq "Cancelled") {
+                $summary = [PSCustomObject]@{
+                    Hostname = $hostname; Status = "Cancelled"; ADFound = $null; Reachable = $null
+                    OperatingSystem = $null; Model = $null; MemoryGB = $null; Processor = $null
+                    BitLockerStatus = "NotCollected"; ErrorCount = 1; SimulationMode = $false
+                    Preview = $true; Mode = "Preview"; Cancelled = $true; Success = $false
+                    Errors = @([PSCustomObject]@{ Source = "InterfaceV2"; Message = "Coleta cancelada pelo operador; nenhuma consulta foi realizada." })
+                    IsSimulated = $false
+                }
+            }
+            else {
+                if ($nextMode -eq "Real") { $summaryArguments.AllowRealOperation = $true }
+                elseif ($nextMode -eq "Preview") { $summaryArguments.Preview = $true }
+                else { $summaryArguments.SimulationMode = $true }
+                $summary = Get-ComputerManagementSummary @summaryArguments
+            }
+
+            # A autorização vale somente para esta chamada; a próxima consulta
+            # volta ao modo seguro até nova escolha e confirmação do operador.
+            $nextMode = "Simulation"
 
             if ($null -eq $summary) {
 
@@ -295,13 +378,31 @@ function Start-V2ComputerManagement {
                 return
             }
 
-            Show-V2ComputerSummary -Summary $summary
+            if ($summary.Cancelled) {
+                Write-V2Header -Title "COMPUTER MANAGEMENT" -Subtitle "Coleta cancelada"
+                Write-Host "  A coleta foi cancelada; nenhuma consulta foi realizada." -ForegroundColor Yellow
+            }
+            else {
+                Show-V2ComputerSummary -Summary $summary
+            }
 
             $option = Read-Host "  Selecione uma opção"
 
             switch ($option) {
 
                 "1" {
+                    Write-Host "  Próxima consulta: [S]imulação, [P]review ou [R]eal autorizada?"
+                    $modeChoice = (Read-Host "  Modo [S/P/R]").Trim().ToUpperInvariant()
+                    if ($modeChoice -eq "P") { $nextMode = "Preview" }
+                    elseif ($modeChoice -eq "R") {
+                        $confirmation = Read-Host "  Para autorizar esta coleta, digite COLETAR REAL"
+                        if ($confirmation -ceq "COLETAR REAL") { $nextMode = "Real" }
+                        else {
+                            $nextMode = "Cancelled"
+                            Write-Host "  Autorização não confirmada; nenhuma coleta real será feita." -ForegroundColor Yellow
+                        }
+                    }
+                    else { $nextMode = "Simulation" }
                 }
 
                 "2" {
@@ -732,9 +833,16 @@ function Start-V2UserUnlockAccount {
         -Title "DESBLOQUEAR CONTA" `
         -Subtitle "Preview da ação"
 
+    $allowRealRead = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Read -Target $SamAccountName)) { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; return }
+        $allowRealRead = $true
+    }
+
     $preview = Get-UserUnlockPreview `
         -SamAccountName $SamAccountName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$allowRealRead
 
     if (-not $preview.Success) {
 
@@ -795,13 +903,21 @@ function Start-V2UserUnlockAccount {
         return
     }
 
+    $allowRealWrite = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Write -Target $SamAccountName)) { Write-Host "Alteração real cancelada." -ForegroundColor Yellow; return }
+        $allowRealWrite = $true
+    }
+
     Write-Host ""
     Write-Host "  Executando ação..." -ForegroundColor Cyan
 
     $executionResult = Invoke-UserUnlockAccount `
         -SamAccountName $SamAccountName `
         -Configuration $Configuration `
-        -Execute
+        -Execute `
+        -AllowRealRead:$allowRealRead `
+        -AllowRealWrite:$allowRealWrite
 
     Show-V2ExecutionResult `
         -ExecutionResult $executionResult `
@@ -842,9 +958,16 @@ function Start-V2UserEnableAccount {
         -Title "ATIVAR CONTA" `
         -Subtitle "Preview da ação"
 
+    $allowRealRead = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Read -Target $SamAccountName)) { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; return }
+        $allowRealRead = $true
+    }
+
     $preview = Get-UserEnablePreview `
         -SamAccountName $SamAccountName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$allowRealRead
 
     if (-not $preview.Success) {
 
@@ -905,13 +1028,21 @@ function Start-V2UserEnableAccount {
         return
     }
 
+    $allowRealWrite = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Write -Target $SamAccountName)) { Write-Host "Alteração real cancelada." -ForegroundColor Yellow; return }
+        $allowRealWrite = $true
+    }
+
     Write-Host ""
     Write-Host "  Executando ação..." -ForegroundColor Cyan
 
     $executionResult = Invoke-UserEnableAccount `
         -SamAccountName $SamAccountName `
         -Configuration $Configuration `
-        -Execute
+        -Execute `
+        -AllowRealRead:$allowRealRead `
+        -AllowRealWrite:$allowRealWrite
 
     Show-V2ExecutionResult `
         -ExecutionResult $executionResult `
@@ -952,9 +1083,16 @@ function Start-V2UserDisableAccount {
         -Title "DESATIVAR CONTA" `
         -Subtitle "Preview da ação"
 
+    $allowRealRead = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Read -Target $SamAccountName)) { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; return }
+        $allowRealRead = $true
+    }
+
     $preview = Get-UserDisablePreview `
         -SamAccountName $SamAccountName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$allowRealRead
 
     if (-not $preview.Success) {
 
@@ -1015,13 +1153,21 @@ function Start-V2UserDisableAccount {
         return
     }
 
+    $allowRealWrite = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Write -Target $SamAccountName)) { Write-Host "Alteração real cancelada." -ForegroundColor Yellow; return }
+        $allowRealWrite = $true
+    }
+
     Write-Host ""
     Write-Host "  Executando ação..." -ForegroundColor Cyan
 
     $executionResult = Invoke-UserDisableAccount `
         -SamAccountName $SamAccountName `
         -Configuration $Configuration `
-        -Execute
+        -Execute `
+        -AllowRealRead:$allowRealRead `
+        -AllowRealWrite:$allowRealWrite
 
     Show-V2ExecutionResult `
         -ExecutionResult $executionResult `
@@ -1062,9 +1208,16 @@ function Start-V2UserForcePasswordChange {
         -Title "FORÇAR TROCA DE SENHA" `
         -Subtitle "Preview da ação"
 
+    $allowRealRead = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Read -Target $SamAccountName)) { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; return }
+        $allowRealRead = $true
+    }
+
     $preview = Get-UserForcePasswordChangePreview `
         -SamAccountName $SamAccountName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$allowRealRead
 
     if (-not $preview.Success) {
 
@@ -1125,13 +1278,21 @@ function Start-V2UserForcePasswordChange {
         return
     }
 
+    $allowRealWrite = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Write -Target $SamAccountName)) { Write-Host "Alteração real cancelada." -ForegroundColor Yellow; return }
+        $allowRealWrite = $true
+    }
+
     Write-Host ""
     Write-Host "  Executando ação..." -ForegroundColor Cyan
 
     $executionResult = Invoke-UserForcePasswordChange `
         -SamAccountName $SamAccountName `
         -Configuration $Configuration `
-        -Execute
+        -Execute `
+        -AllowRealRead:$allowRealRead `
+        -AllowRealWrite:$allowRealWrite
 
     Show-V2ExecutionResult `
         -ExecutionResult $executionResult `
@@ -1184,6 +1345,29 @@ function Start-V2UserManagement {
 
         $samAccountName = $samAccountName.Trim()
 
+        $allowRealRead = $false
+        $domainController = ""
+        $modeChoice = (Read-Host "Modo de consulta [S]imulação/[R]eal").Trim().ToUpperInvariant()
+        if ($modeChoice -eq "R") {
+            $readAuthorization = Read-Host "Para autorizar esta leitura AD, digite CONSULTAR REAL"
+            if ($readAuthorization -ceq "CONSULTAR REAL") { $allowRealRead = $true }
+            else { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; Pause-V2; continue }
+
+            $domainController = (Read-Host "Informe o DomainController configurado para esta consulta").Trim()
+            $controllerLabels = @($domainController.TrimEnd('.').Split('.'))
+            $invalidControllerLabel = @($controllerLabels | Where-Object {
+                $_.Length -lt 1 -or $_.Length -gt 63 -or $_ -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$'
+            }).Count -gt 0
+            if ([string]::IsNullOrWhiteSpace($domainController) -or
+                $domainController.Length -gt 253 -or
+                $domainController -match "[\x00-\x20]" -or
+                $invalidControllerLabel) {
+                Write-Host "DomainController ausente ou inválido; nenhuma consulta foi realizada." -ForegroundColor Red
+                Pause-V2
+                continue
+            }
+        }
+
         try {
 
             # ------------------------------------------------
@@ -1193,9 +1377,9 @@ function Start-V2UserManagement {
             $configuration = [PSCustomObject]@{
                 Domain = "BRSPO"
 
-                DomainController = ""
+                DomainController = $domainController
 
-                SimulationMode = $true
+                SimulationMode = (-not $allowRealRead)
 
                 UserPrincipalName = [PSCustomObject]@{
                     Enabled = $true
@@ -1227,7 +1411,8 @@ function Start-V2UserManagement {
 
             $managementResult = Get-UserManagement `
                 -SamAccountName $samAccountName `
-                -Configuration $configuration
+                -Configuration $configuration `
+                -AllowRealRead:$allowRealRead
 
             if (-not $managementResult.Success) {
 
@@ -1438,6 +1623,31 @@ function Show-V2GroupSummary {
 }
 
 
+function Get-V2GroupQueryMessage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Result
+    )
+
+    if ($Result.Cancelled -or $Result.Status -eq "Cancelled") {
+        return "Consulta cancelada; nenhum estado operacional foi confirmado."
+    }
+
+    if ($Result.SimulationMode -or $Result.QueryStatus -eq "Simulation") {
+        return "Dados demonstrativos; nenhuma consulta real foi realizada."
+    }
+
+    switch ([string]$Result.QueryStatus) {
+        "NotFound" { return "Grupo não encontrado; a consulta foi concluída sem resultado." }
+        "Error" { return "Erro durante a consulta do grupo; o estado não foi confirmado." }
+        "NotQueried" { return "Consulta não realizada; o estado do grupo é desconhecido." }
+        "Found" { return "Grupo encontrado." }
+        default { return "Estado do grupo desconhecido; não foi possível confirmar o resultado da consulta." }
+    }
+}
+
+
 function Show-V2GroupMembers {
     [CmdletBinding()]
     param(
@@ -1456,7 +1666,8 @@ function Show-V2GroupMembers {
     Write-Host ""
 
     if (-not $MembersResult.Success) {
-        Write-Host "  Não foi possível listar os membros." -ForegroundColor Red
+        $queryMessage = Get-V2GroupQueryMessage -Result $MembersResult
+        Write-Host "  $queryMessage" -ForegroundColor Red
         Write-Host ""
         Write-Host "  $($MembersResult.Error)" -ForegroundColor Yellow
         Pause-V2
@@ -1511,6 +1722,12 @@ function Start-V2GroupAddMember {
 
     $member = $member.Trim()
 
+    $allowRealRead = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Read -Target "$GroupName/$member")) { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; return }
+        $allowRealRead = $true
+    }
+
     Write-V2Header `
         -Title "ADICIONAR MEMBRO" `
         -Subtitle "Preview da ação"
@@ -1519,7 +1736,8 @@ function Start-V2GroupAddMember {
         -Action "AddMember" `
         -GroupName $GroupName `
         -SamAccountName $member `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$allowRealRead
 
     if (-not $preview.Success) {
         Write-Host "  Não foi possível gerar o preview." -ForegroundColor Red
@@ -1563,11 +1781,19 @@ function Start-V2GroupAddMember {
         return
     }
 
+    $allowRealWrite = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Write -Target "$GroupName/$member")) { Write-Host "Alteração real cancelada." -ForegroundColor Yellow; return }
+        $allowRealWrite = $true
+    }
+
     $result = Invoke-GroupAddMember `
         -GroupName $GroupName `
         -SamAccountName $member `
         -Configuration $Configuration `
-        -Execute
+        -Execute `
+        -AllowRealRead:$allowRealRead `
+        -AllowRealWrite:$allowRealWrite
 
     Write-Host ""
 
@@ -1613,6 +1839,12 @@ function Start-V2GroupRemoveMember {
 
     $member = $member.Trim()
 
+    $allowRealRead = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Read -Target "$GroupName/$member")) { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; return }
+        $allowRealRead = $true
+    }
+
     Write-V2Header `
         -Title "REMOVER MEMBRO" `
         -Subtitle "Preview da ação"
@@ -1621,7 +1853,8 @@ function Start-V2GroupRemoveMember {
         -Action "RemoveMember" `
         -GroupName $GroupName `
         -SamAccountName $member `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$allowRealRead
 
     if (-not $preview.Success) {
         Write-Host "  Não foi possível gerar o preview." -ForegroundColor Red
@@ -1665,11 +1898,19 @@ function Start-V2GroupRemoveMember {
         return
     }
 
+    $allowRealWrite = $false
+    if (-not $Configuration.SimulationMode) {
+        if (-not (Request-V2OneTimeAuthorization -Kind Write -Target "$GroupName/$member")) { Write-Host "Alteração real cancelada." -ForegroundColor Yellow; return }
+        $allowRealWrite = $true
+    }
+
     $result = Invoke-GroupRemoveMember `
         -GroupName $GroupName `
         -SamAccountName $member `
         -Configuration $Configuration `
-        -Execute
+        -Execute `
+        -AllowRealRead:$allowRealRead `
+        -AllowRealWrite:$allowRealWrite
 
     Write-Host ""
 
@@ -1712,6 +1953,8 @@ function Start-V2GroupManagement {
         -ErrorAction Stop
 
     $configuration = Get-V2GroupConfiguration
+    $groupModeChoice = (Read-Host "Modo padrão do fluxo [S]imulação/[R]eal sob autorização por operação").Trim().ToUpperInvariant()
+    if ($groupModeChoice -eq "R") { $configuration.SimulationMode = $false }
 
     :GroupQueryLoop do {
 
@@ -1735,17 +1978,25 @@ function Start-V2GroupManagement {
 
         try {
 
+            $allowRealRead = $false
+            if (-not $configuration.SimulationMode) {
+                if (-not (Request-V2OneTimeAuthorization -Kind Read -Target $groupName)) { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; continue }
+                $allowRealRead = $true
+            }
+
             $groupResult = Get-GroupManagement `
                 -GroupName $groupName `
-                -Configuration $configuration
+                -Configuration $configuration `
+                -AllowRealRead:$allowRealRead
 
             if (-not $groupResult.Success) {
                 Write-V2Header `
                     -Title "GROUP MANAGEMENT" `
                     -Subtitle "Resultado da consulta"
 
+                $queryMessage = Get-V2GroupQueryMessage -Result $groupResult
                 Write-Host `
-                    "  Grupo não encontrado ou consulta não concluída." `
+                    "  $queryMessage" `
                     -ForegroundColor Red
 
                 Write-Host ""
@@ -1769,9 +2020,15 @@ function Start-V2GroupManagement {
                 switch ($option) {
 
                     "1" {
+                        $allowMembersRead = $false
+                        if (-not $configuration.SimulationMode) {
+                            if (-not (Request-V2OneTimeAuthorization -Kind Read -Target "$groupName membros")) { Write-Host "Leitura real cancelada." -ForegroundColor Yellow; break }
+                            $allowMembersRead = $true
+                        }
                         $membersResult = Get-GroupManagementMembers `
                             -GroupName $groupName `
-                            -Configuration $configuration
+                            -Configuration $configuration `
+                            -AllowRealRead:$allowMembersRead
 
                         Show-V2GroupMembers `
                             -MembersResult $membersResult `
@@ -1783,9 +2040,12 @@ function Start-V2GroupManagement {
                             -GroupName $groupName `
                             -Configuration $configuration
 
+                        $allowRefreshRead = $false
+                        if (-not $configuration.SimulationMode) { $allowRefreshRead = Request-V2OneTimeAuthorization -Kind Read -Target $groupName }
                         $groupResult = Get-GroupManagement `
                             -GroupName $groupName `
-                            -Configuration $configuration
+                            -Configuration $configuration `
+                            -AllowRealRead:$allowRefreshRead
                     }
 
                     "3" {
@@ -1793,9 +2053,12 @@ function Start-V2GroupManagement {
                             -GroupName $groupName `
                             -Configuration $configuration
 
+                        $allowRefreshRead = $false
+                        if (-not $configuration.SimulationMode) { $allowRefreshRead = Request-V2OneTimeAuthorization -Kind Read -Target $groupName }
                         $groupResult = Get-GroupManagement `
                             -GroupName $groupName `
-                            -Configuration $configuration
+                            -Configuration $configuration `
+                            -AllowRealRead:$allowRefreshRead
                     }
 
                     "4" {

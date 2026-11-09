@@ -363,8 +363,18 @@ function Get-ComputerInventory {
 
     param (
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
+
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "SimulationMode deve ser definido explicitamente como Boolean."
+    }
+
+    if (-not $Configuration.SimulationMode -and -not $AllowRealOperation) {
+        throw "Coleta real bloqueada. Informe -AllowRealOperation explicitamente."
+    }
 
     $ComputerSystem = $null
     $OperatingSystem = $null
@@ -512,16 +522,243 @@ function Get-ComputerInventory {
 }
 
 
+function Assert-ComputerInventoryPathSyntax {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ParameterName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or $Path -ne $Path.Trim()) {
+        throw "$ParameterName contém um caminho vazio ou ambíguo."
+    }
+
+    $normalizedPath = $Path.Replace('/', '\')
+    if ($normalizedPath.StartsWith('\\') -or
+        $normalizedPath.StartsWith('\??\') -or
+        $normalizedPath.StartsWith('\Device\')) {
+        throw "$ParameterName não pode usar namespace de dispositivo ou caminho UNC."
+    }
+    $isDriveAbsolute = $normalizedPath -match '^[A-Za-z]:\\'
+    if ($normalizedPath -match '^[A-Za-z]:(?!\\)') {
+        throw "$ParameterName não pode usar caminho relativo a unidade."
+    }
+    if ($normalizedPath.StartsWith('\') -and -not $isDriveAbsolute) {
+        throw "$ParameterName deve usar um caminho relativo ou absoluto em unidade local."
+    }
+
+    $segments = @($normalizedPath.Split([char]92) | Where-Object { $_ -ne '' })
+    for ($index = 0; $index -lt $segments.Count; $index++) {
+        $segment = $segments[$index]
+
+        if ($segment -eq '.' -or $segment -eq '..') {
+            throw "$ParameterName não pode conter segmentos '.' ou '..'."
+        }
+
+        if ($isDriveAbsolute -and $index -eq 0 -and $segment -match '^[A-Za-z]:$') {
+            continue
+        }
+
+        if ($segment -match '[<>:"|?*\x00-\x1F]' -or $segment.EndsWith('.') -or $segment.EndsWith(' ')) {
+            throw "$ParameterName contém caracteres ou segmentos inválidos."
+        }
+
+        if ($segment -match '^(?i)(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$') {
+            throw "$ParameterName não pode usar nomes de dispositivo reservados."
+        }
+    }
+
+    if ($normalizedPath.Contains(':') -and -not $isDriveAbsolute) {
+        throw "$ParameterName não pode conter Alternate Data Streams."
+    }
+
+    if ($isDriveAbsolute -and $segments.Count -gt 0 -and $segments[0] -match '^[A-Za-z]:$') {
+        $segments = @($segments | Select-Object -Skip 1)
+    }
+
+    if ($segments.Count -eq 0 -and -not $isDriveAbsolute) {
+        throw "$ParameterName deve identificar um caminho abaixo da raiz permitida."
+    }
+}
+
+
+function Assert-ComputerInventoryNoReparsePoints {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $volumeRoot = [System.IO.Path]::GetPathRoot($fullPath)
+    if ([string]::IsNullOrWhiteSpace($volumeRoot) -or $fullPath.StartsWith('\\')) {
+        throw "Caminho de exportação não local ou sem raiz de volume: $fullPath"
+    }
+
+    $currentPath = $volumeRoot
+    $remainingPath = $fullPath.Substring($volumeRoot.Length)
+    foreach ($segment in @($remainingPath.Split([char]92) | Where-Object { $_ -ne '' })) {
+        $currentPath = Join-Path $currentPath $segment
+        try {
+            $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+        }
+        catch [System.Management.Automation.ItemNotFoundException] {
+            break
+        }
+        catch [System.IO.FileNotFoundException] {
+            break
+        }
+        catch [System.IO.DirectoryNotFoundException] {
+            break
+        }
+        catch {
+            throw "Não foi possível validar o caminho de exportação '$currentPath': $($_.Exception.Message)"
+        }
+
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Caminho de exportação contém reparse point: $currentPath"
+        }
+    }
+}
+
+
+function Resolve-ComputerInventoryExportDirectory {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$OutputDirectory,
+
+        [Parameter(Mandatory = $true)]
+        [string]$AllowedRoot
+    )
+
+    Assert-ComputerInventoryPathSyntax -Path $AllowedRoot -ParameterName 'AllowedRoot'
+    Assert-ComputerInventoryPathSyntax -Path $OutputDirectory -ParameterName 'Output.Directory'
+
+    if ($AllowedRoot.Replace('/', '\') -notmatch '^[A-Za-z]:\\') {
+        throw 'AllowedRoot deve ser um caminho local absoluto confiável.'
+    }
+
+    $resolvedRoot = [System.IO.Path]::GetFullPath($AllowedRoot).TrimEnd([char]92)
+    $rootVolume = [System.IO.Path]::GetPathRoot($resolvedRoot)
+    if ([string]::IsNullOrWhiteSpace($rootVolume) -or $resolvedRoot.StartsWith('\\')) {
+        throw 'AllowedRoot deve estar em uma unidade local, não em UNC ou dispositivo.'
+    }
+
+    if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+        $resolvedOutput = [System.IO.Path]::GetFullPath($OutputDirectory)
+    }
+    else {
+        $resolvedOutput = [System.IO.Path]::GetFullPath((Join-Path $resolvedRoot $OutputDirectory))
+    }
+
+    $rootWithSeparator = $resolvedRoot.TrimEnd([char]92) + [System.IO.Path]::DirectorySeparatorChar
+    $isWithinRoot = $resolvedOutput.Equals($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $resolvedOutput.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $isWithinRoot) {
+        throw "Output.Directory deve permanecer dentro de AllowedRoot ('$resolvedRoot')."
+    }
+
+    Assert-ComputerInventoryNoReparsePoints -Path $resolvedRoot
+    Assert-ComputerInventoryNoReparsePoints -Path $resolvedOutput
+
+    foreach ($existingPath in @($resolvedRoot, $resolvedOutput)) {
+        if (Test-Path -LiteralPath $existingPath -ErrorAction Stop) {
+            $existingItem = Get-Item -LiteralPath $existingPath -Force -ErrorAction Stop
+            if (-not $existingItem.PSIsContainer) {
+                throw "O caminho de exportação não é um diretório: $existingPath"
+            }
+        }
+    }
+
+    return $resolvedOutput
+}
+
+
+function Assert-ComputerInventoryFileNameSegment {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name) -or $Name -ne $Name.Trim() -or
+        $Name -eq '.' -or $Name -eq '..' -or
+        $Name -match '[\\/:<>:"|?*\x00-\x1F]' -or
+        $Name.EndsWith('.') -or $Name.EndsWith(' ')) {
+        throw 'ComputerName não é um segmento de nome de arquivo válido.'
+    }
+
+    if ($Name -match '^(?i)(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$') {
+        throw 'ComputerName não pode usar um nome de dispositivo reservado.'
+    }
+}
+
+
+function Resolve-ComputerInventoryExportFilePath {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$AllowedRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ReportDirectory,
+
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    Assert-ComputerInventoryFileNameSegment -Name $FileName
+
+    $resolvedRoot = [System.IO.Path]::GetFullPath($AllowedRoot).TrimEnd([char]92)
+    $resolvedDirectory = [System.IO.Path]::GetFullPath($ReportDirectory)
+    $resolvedFile = [System.IO.Path]::GetFullPath((Join-Path $resolvedDirectory $FileName))
+    $rootWithSeparator = $resolvedRoot.TrimEnd([char]92) + [System.IO.Path]::DirectorySeparatorChar
+
+    foreach ($candidate in @($resolvedDirectory, $resolvedFile)) {
+        $isWithinRoot = $candidate.Equals($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $candidate.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)
+        if (-not $isWithinRoot) {
+            throw "Destino de arquivo escapou de AllowedRoot ('$resolvedRoot')."
+        }
+    }
+
+    Assert-ComputerInventoryNoReparsePoints -Path $resolvedFile
+
+    if (Test-Path -LiteralPath $resolvedFile -ErrorAction Stop) {
+        $existingFile = Get-Item -LiteralPath $resolvedFile -Force -ErrorAction Stop
+        if (($existingFile.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Destino de arquivo é reparse point: $resolvedFile"
+        }
+        throw "Destino de exportação já existe; sobrescrita bloqueada: $resolvedFile"
+    }
+
+    return $resolvedFile
+}
+
+
 function Export-ComputerInventory {
 
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
     param (
         [Parameter(Mandatory = $true)]
         [PSCustomObject]$Inventory,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [Parameter()]
+        [string]$AllowedRoot = (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'PowerShell-Automation\ComputerInventory')
     )
 
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "SimulationMode deve ser definido explicitamente como Boolean."
+    }
 
     if ($Configuration.SimulationMode -eq $true) {
         return [PSCustomObject]@{
@@ -533,6 +770,9 @@ function Export-ComputerInventory {
         }
     }
 
+    if (-not $AllowRealOperation) {
+        throw "Exportação real bloqueada. Informe -AllowRealOperation explicitamente."
+    }
 
     try {
 
@@ -542,32 +782,74 @@ function Export-ComputerInventory {
             throw "O diretorio de saida nao foi configurado."
         }
 
-        if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
-            $ReportDirectory = $OutputDirectory
+        $ReportDirectory = Resolve-ComputerInventoryExportDirectory `
+            -OutputDirectory $OutputDirectory `
+            -AllowedRoot $AllowedRoot
+
+        $ComputerName = [string]$Inventory.ComputerSystem.ComputerName
+        if ([string]::IsNullOrWhiteSpace($ComputerName)) {
+            $ComputerName = [string]$env:COMPUTERNAME
         }
-        else {
-            $ReportDirectory = Join-Path $PSScriptRoot $OutputDirectory
+        Assert-ComputerInventoryFileNameSegment -Name $ComputerName
+
+        $Timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
+        $BaseFileName = 'ComputerInventory_' + $ComputerName + '_' + $Timestamp
+        $ExportTargets = @{}
+
+        foreach ($Format in $Configuration.Output.Formats) {
+            switch ($Format.ToUpperInvariant()) {
+                "JSON" {
+                    if ($ExportTargets.ContainsKey("JSON")) {
+                        throw "Formato JSON duplicado na configuração de exportação."
+                    }
+                    $ExportTargets["JSON"] = Resolve-ComputerInventoryExportFilePath `
+                        -AllowedRoot $AllowedRoot `
+                        -ReportDirectory $ReportDirectory `
+                        -FileName "$BaseFileName.json"
+                }
+                "CSV" {
+                    if ($ExportTargets.ContainsKey("CSV")) {
+                        throw "Formato CSV duplicado na configuração de exportação."
+                    }
+                    $ExportTargets["CSV"] = Resolve-ComputerInventoryExportFilePath `
+                        -AllowedRoot $AllowedRoot `
+                        -ReportDirectory $ReportDirectory `
+                        -FileName "$BaseFileName.csv"
+                }
+            }
         }
 
-        if (-not (Test-Path $ReportDirectory)) {
+        if (-not $PSCmdlet.ShouldProcess($ReportDirectory, "Exportar inventário de computador")) {
+            return [PSCustomObject]@{
+                Success = $false
+                SimulationMode = $false
+                Directory = $ReportDirectory
+                Files = @()
+                Message = "A exportação não foi aprovada; nenhum arquivo foi gravado."
+            }
+        }
+
+        if (-not (Test-Path -LiteralPath $AllowedRoot -ErrorAction Stop)) {
+
+            New-Item `
+                -ItemType Directory `
+                -Path $AllowedRoot `
+                -ErrorAction Stop |
+                Out-Null
+        }
+
+        Assert-ComputerInventoryNoReparsePoints -Path $AllowedRoot
+
+        if (-not (Test-Path -LiteralPath $ReportDirectory -ErrorAction Stop)) {
 
             New-Item `
                 -ItemType Directory `
                 -Path $ReportDirectory `
-                -Force |
+                -ErrorAction Stop |
                 Out-Null
         }
 
-        $ComputerName = $Inventory.ComputerSystem.ComputerName
-
-        if ([string]::IsNullOrWhiteSpace($ComputerName)) {
-
-            $ComputerName = $env:COMPUTERNAME
-        }
-
-        $Timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
-
-        $BaseFileName = "ComputerInventory_${ComputerName}_${Timestamp}"
+        Assert-ComputerInventoryNoReparsePoints -Path $ReportDirectory
 
         $ExportedFiles = @()
 
@@ -577,9 +859,13 @@ function Export-ComputerInventory {
 
                 "JSON" {
 
-                    $JsonPath = Join-Path `
-                        $ReportDirectory `
-                        "$BaseFileName.json"
+                    $JsonPath = Resolve-ComputerInventoryExportFilePath `
+                        -AllowedRoot $AllowedRoot `
+                        -ReportDirectory $ReportDirectory `
+                        -FileName "$BaseFileName.json"
+                    if ($JsonPath -ne $ExportTargets["JSON"]) {
+                        throw "Destino JSON mudou após a validação inicial."
+                    }
 
                     $Inventory |
                         ConvertTo-Json -Depth 10 |
@@ -592,9 +878,13 @@ function Export-ComputerInventory {
 
                 "CSV" {
 
-                    $CsvPath = Join-Path `
-                        $ReportDirectory `
-                        "$BaseFileName.csv"
+                    $CsvPath = Resolve-ComputerInventoryExportFilePath `
+                        -AllowedRoot $AllowedRoot `
+                        -ReportDirectory $ReportDirectory `
+                        -FileName "$BaseFileName.csv"
+                    if ($CsvPath -ne $ExportTargets["CSV"]) {
+                        throw "Destino CSV mudou após a validação inicial."
+                    }
 
                     $ComputerSystem = $Inventory.ComputerSystem
                     $OperatingSystem = $Inventory.OperatingSystem

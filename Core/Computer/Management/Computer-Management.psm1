@@ -6,355 +6,261 @@ if (-not (Test-Path -LiteralPath $script:ComputerCorePath)) {
     throw "Computer Core não encontrado em: $script:ComputerCorePath"
 }
 
-Import-Module $script:ComputerCorePath -Force
+$script:ComputerCoreModule = Import-Module $script:ComputerCorePath -Force -PassThru -ErrorAction Stop
+if ($null -eq $script:ComputerCoreModule -or
+    [System.IO.Path]::GetFullPath($script:ComputerCoreModule.Path) -ne [System.IO.Path]::GetFullPath($script:ComputerCorePath)) {
+    throw "A instância esperada do Computer Core não foi carregada: $script:ComputerCorePath"
+}
 
+$script:ComputerCoreInventoryCommand = $script:ComputerCoreModule.ExportedCommands["Get-ComputerInventory"]
+if ($null -eq $script:ComputerCoreInventoryCommand -or
+    $script:ComputerCoreInventoryCommand.Module -ne $script:ComputerCoreModule) {
+    throw "Get-ComputerInventory não foi exportada pela instância esperada do Computer Core."
+}
+
+function Invoke-ComputerCoreInventory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Arguments
+    )
+
+    # Preserve a module-local test/extension seam while rejecting commands
+    # supplied by unrelated modules with the same exported function name.
+    $localOverride = Microsoft.PowerShell.Core\Get-Command `
+        Get-ComputerInventory `
+        -CommandType Function `
+        -ErrorAction SilentlyContinue
+
+    if ($null -ne $localOverride -and
+        $localOverride.Module -eq $ExecutionContext.SessionState.Module) {
+        return & $localOverride @Arguments
+    }
+
+    if ($null -eq $script:ComputerCoreInventoryCommand -or
+        $script:ComputerCoreInventoryCommand.Module -ne $script:ComputerCoreModule) {
+        throw "A referência da função Get-ComputerInventory do Computer Core está indisponível."
+    }
+
+    return & $script:ComputerCoreInventoryCommand @Arguments
+}
+
+function Invoke-ComputerManagementShouldProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Management.Automation.PSCmdlet]$Cmdlet,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Action
+    )
+    return $Cmdlet.ShouldProcess($Target, $Action)
+}
 
 function Get-ComputerManagement {
-    <#
-    .SYNOPSIS
-        Consulta consolidada de um computador.
-
-    .DESCRIPTION
-        Utiliza o Computer Core para coletar informações de Active Directory,
-        hardware, sistema operacional, processador, memória, armazenamento,
-        rede, BitLocker e conectividade.
-
-        O Management organiza o resultado do Core para consumo da interface
-        e futuras ações administrativas.
-
-    .PARAMETER Hostname
-        Nome do computador que será consultado.
-
-    .PARAMETER SimulationMode
-        Mantém o contexto de Simulation Mode para futuras operações.
-        A consulta atual é somente leitura.
-    #>
-
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Low')]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$Hostname,
 
-        [switch]$SimulationMode
+        [switch]$SimulationMode,
+        [switch]$Preview,
+        [switch]$AllowRealOperation
     )
 
-    $hostnameNormalized = $Hostname.Trim().ToUpperInvariant()
+    $whatIfRequested = [bool]$WhatIfPreference
+    $explicitPreview = $Preview.IsPresent
+    $simulationRequested = $SimulationMode.IsPresent
+    $realRequested = $AllowRealOperation.IsPresent
+    $conflictingModes = ($simulationRequested -and ($explicitPreview -or $whatIfRequested -or $realRequested)) -or
+        ($explicitPreview -and $realRequested)
+    $modeRequested = $simulationRequested -or $explicitPreview -or $whatIfRequested -or $realRequested
 
+    if (-not $modeRequested -or $conflictingModes) {
+        return [PSCustomObject]@{
+            Success = $false; Hostname = $Hostname; SimulationMode = $false
+            Preview = $false; Mode = "Error"; Status = "Error"; Cancelled = $false
+            CollectionStatus = "Error"; QueryStatus = $null
+            Summary = $null; Data = $null
+            Errors = @([PSCustomObject]@{ Source = "ComputerManagement"; Message = if ($conflictingModes) { "Modos conflitantes; nenhuma consulta foi realizada." } else { "Informe um modo: SimulationMode, Preview/WhatIf ou AllowRealOperation." } })
+        }
+    }
+
+    # WhatIf is an unconditional preview request, including when the caller
+    # also supplies the real-operation capability switch.
+    $mode = if ($simulationRequested) { "Simulation" } elseif ($explicitPreview -or $whatIfRequested) { "Preview" } else { "Real" }
+
+    $hostnameNormalized = $Hostname.Trim().ToUpperInvariant()
     if ([string]::IsNullOrWhiteSpace($hostnameNormalized)) {
         return [PSCustomObject]@{
-            Success        = $false
-            Hostname       = $Hostname
-            SimulationMode = [bool]$SimulationMode
-            Status         = "Invalid"
-            Summary        = $null
-            Data           = $null
-            Errors         = @(
-                [PSCustomObject]@{
-                    Source  = "ComputerManagement"
-                    Message = "Hostname não pode ser vazio."
-                }
-            )
+            Success = $false; Hostname = $Hostname; SimulationMode = ($mode -eq "Simulation")
+            Preview = ($mode -eq "Preview"); Mode = $mode; Status = "Invalid"; Cancelled = $false
+            CollectionStatus = "Error"; QueryStatus = $null; Summary = $null; Data = $null
+            Errors = @([PSCustomObject]@{ Source = "ComputerManagement"; Message = "Hostname não pode ser vazio." })
+        }
+    }
+
+    if ($mode -eq "Real" -and -not (Invoke-ComputerManagementShouldProcess -Cmdlet $PSCmdlet -Target $hostnameNormalized -Action "Consultar inventário do computador")) {
+        return [PSCustomObject]@{
+            Success = $false; Hostname = $hostnameNormalized; SimulationMode = $false
+            Preview = $true; Mode = "Preview"; Status = "Cancelled"; Cancelled = $true
+            CollectionStatus = "Cancelled"; QueryStatus = $null; Summary = $null; Data = $null
+            Errors = @([PSCustomObject]@{ Source = "ComputerManagement"; Message = "Coleta cancelada pelo usuário; nenhuma consulta externa foi realizada." })
         }
     }
 
     try {
+        $coreArguments = @{ ComputerName = $hostnameNormalized }
+        if ($mode -eq "Simulation") { $coreArguments.SimulationMode = $true }
+        elseif ($mode -eq "Preview") { $coreArguments.Preview = $true }
+        else { $coreArguments.AllowRealOperation = $true; $coreArguments.Confirm = $false }
+        $coreResult = Invoke-ComputerCoreInventory -Arguments $coreArguments
 
-        # ==================================================
-        # COMPUTER CORE
-        # ==================================================
-
-        $coreResult = Get-ComputerInventory `
-            -ComputerName $hostnameNormalized
-
-
-        # ==================================================
-        # VALIDAR RETORNO DO CORE
-        # ==================================================
-
-        if ($null -eq $coreResult) {
-            return [PSCustomObject]@{
-                Success        = $false
-                Hostname       = $hostnameNormalized
-                SimulationMode = [bool]$SimulationMode
-                Status         = "Error"
-                Summary        = $null
-                Data           = $null
-                Errors         = @(
-                    [PSCustomObject]@{
-                        Source  = "ComputerCore"
-                        Message = "O Computer Core não retornou resultado."
-                    }
-                )
-            }
-        }
-
-
-        # ==================================================
-        # INVENTÁRIO REAL
-        # ==================================================
-        #
-        # Get-ComputerInventory retorna:
-        #
-        # Success
-        # Data
-        # Error
-        #
-        # O inventário está dentro de Data.
-        #
-
+        if ($null -eq $coreResult) { throw "O Computer Core não retornou resultado." }
         $inventory = $coreResult.Data
-
-
-        # ==================================================
-        # ERROS
-        # ==================================================
-
+        $queryStatus = $null
+        if ($null -ne $coreResult.PSObject.Properties["QueryStatus"]) { $queryStatus = $coreResult.PSObject.Properties["QueryStatus"].Value }
+        elseif ($null -ne $inventory -and $null -ne $inventory.PSObject.Properties["QueryStatus"]) { $queryStatus = $inventory.PSObject.Properties["QueryStatus"].Value }
+        $collectionStatus = $null
+        if ($null -ne $coreResult.PSObject.Properties["CollectionStatus"]) { $collectionStatus = $coreResult.PSObject.Properties["CollectionStatus"].Value }
+        elseif ($null -ne $inventory -and $null -ne $inventory.PSObject.Properties["CollectionStatus"]) { $collectionStatus = $inventory.PSObject.Properties["CollectionStatus"].Value }
         $errors = @()
-
-        if ($null -ne $coreResult.Error) {
-            $errors += [PSCustomObject]@{
-                Source  = "ComputerCore"
-                Message = [string]$coreResult.Error
-            }
+        if ($null -ne $inventory -and $null -ne $inventory.Errors) { $errors += @($inventory.Errors) }
+        elseif ($null -ne $coreResult.PSObject.Properties["Errors"] -and $null -ne $coreResult.PSObject.Properties["Errors"].Value) { $errors += @($coreResult.PSObject.Properties["Errors"].Value) }
+        if ($errors.Count -eq 0 -and $null -ne $coreResult.PSObject.Properties["Error"] -and -not [string]::IsNullOrWhiteSpace([string]$coreResult.PSObject.Properties["Error"].Value)) {
+            $errors += [PSCustomObject]@{ Source = "ComputerCore"; Message = [string]$coreResult.PSObject.Properties["Error"].Value }
         }
 
-        if ($null -ne $inventory) {
-            if ($null -ne $inventory.Errors) {
-                $errors += @($inventory.Errors)
+        if ($coreResult.Cancelled -or $coreResult.Status -eq "Cancelled") {
+            return [PSCustomObject]@{
+                Success = $false; Hostname = $hostnameNormalized; SimulationMode = $false
+                Preview = $true; Mode = "Preview"; Status = "Cancelled"; Cancelled = $true
+                CollectionStatus = "Cancelled"; QueryStatus = $queryStatus
+                Summary = $null; Data = $null; Errors = $errors
             }
         }
-
-
-        # ==================================================
-        # CASO O CORE NÃO TENHA DADOS
-        # ==================================================
 
         if ($null -eq $inventory) {
-
             return [PSCustomObject]@{
-                Success        = [bool]$coreResult.Success
-                Hostname       = $hostnameNormalized
-                SimulationMode = [bool]$SimulationMode
-                Status         = "Unavailable"
-                Summary        = $null
-                Data           = $null
-                Errors         = $errors
+                Success = [bool]$coreResult.Success; Hostname = $hostnameNormalized
+                SimulationMode = ($mode -eq "Simulation"); Preview = ($mode -eq "Preview")
+                Mode = $mode; Status = [string]$coreResult.Status; Cancelled = $false
+                CollectionStatus = $collectionStatus; QueryStatus = $queryStatus
+                Summary = $null; Data = $null; Errors = $errors
             }
         }
 
-
-        # ==================================================
-        # ACTIVE DIRECTORY
-        # ==================================================
-
-        $adFound = $false
-
-        if ($null -ne $inventory.AD) {
-            if ($null -ne $inventory.AD.Found) {
-                $adFound = [bool]$inventory.AD.Found
-            }
+        # Mode is authoritative. Core uses IsSimulated to label its harmless
+        # preview payload too; that must never turn Preview into Simulation.
+        $isSimulated = ($mode -eq "Simulation") -or ($mode -eq "Real" -and [bool]$coreResult.IsSimulated)
+        $adFound = $null
+        $reachable = $null
+        $adQueryStatus = if ($null -ne $inventory.AD -and $inventory.AD.QueryStatus) { [string]$inventory.AD.QueryStatus } else { "Unknown" }
+        $connectivityStatus = if ($null -ne $inventory.Connectivity -and $inventory.Connectivity.Status) { [string]$inventory.Connectivity.Status } else { "Unknown" }
+        if (-not $isSimulated -and $mode -eq "Real") {
+            if ($adQueryStatus -eq "Found" -and $inventory.AD.Found -eq $true) { $adFound = $true }
+            elseif ($adQueryStatus -eq "NotFound" -and $inventory.AD.Found -eq $false) { $adFound = $false }
+            if ($connectivityStatus -eq "Responded" -and $inventory.Connectivity.Reachable -eq $true) { $reachable = $true }
+            elseif ($connectivityStatus -eq "NoResponse" -and $inventory.Connectivity.Reachable -eq $false) { $reachable = $false }
         }
-
-
-        # ==================================================
-        # CONNECTIVITY
-        # ==================================================
-
-        $reachable = $false
-
-        if ($null -ne $inventory.Connectivity) {
-            if ($null -ne $inventory.Connectivity.Reachable) {
-                $reachable = [bool]$inventory.Connectivity.Reachable
-            }
+        $status = if ($mode -eq "Preview") { "Preview" } elseif ($isSimulated) { "Simulated" } else { "Unknown" }
+        if (-not $isSimulated -and $mode -eq "Real") {
+            if ($adFound -eq $true -and $reachable -eq $true) { $status = "Online" }
+            elseif ($adFound -eq $true -and $reachable -eq $false) { $status = "Offline" }
+            elseif ($adFound -eq $false -and $reachable -eq $true) { $status = "ReachableOnly" }
+            elseif ($adFound -eq $false -and $reachable -eq $false) { $status = "Unavailable" }
         }
-
-
-        # ==================================================
-        # STATUS OPERACIONAL
-        # ==================================================
-
-        $status = "Unknown"
-
-        if ($adFound -and $reachable) {
-            $status = "Online"
-        }
-        elseif ($adFound -and -not $reachable) {
-            $status = "Offline"
-        }
-        elseif (-not $adFound -and $reachable) {
-            $status = "ReachableOnly"
-        }
-        elseif (-not $adFound -and -not $reachable) {
-            $status = "Unavailable"
-        }
-
-
-        # ==================================================
-        # SISTEMA OPERACIONAL
-        # ==================================================
-
-        $operatingSystem = $null
-
-        if ($null -ne $inventory.OperatingSystem) {
-            $operatingSystem = $inventory.OperatingSystem.Caption
-        }
-
-
-        # ==================================================
-        # MODELO
-        # ==================================================
-
-        $computerModel = $null
-
-        if ($null -ne $inventory.System) {
-            $computerModel = $inventory.System.Model
-        }
-
-
-        # ==================================================
-        # MEMÓRIA
-        # ==================================================
-
-        $memoryGB = $null
-
-        if ($null -ne $inventory.Memory) {
-            $memoryGB = $inventory.Memory.TotalGB
-        }
-
-
-        # ==================================================
-        # PROCESSADOR
-        # ==================================================
-
-        $processorName = $null
-
-        if ($null -ne $inventory.Processor) {
-            $processorName = $inventory.Processor.Name
-        }
-
-
-        # ==================================================
-        # BITLOCKER
-        # ==================================================
-
-        $bitLockerStatus = "NotAvailable"
-
-        if ($null -ne $inventory.BitLocker) {
-            if ($null -ne $inventory.BitLocker.Status) {
-                $bitLockerStatus = $inventory.BitLocker.Status
-            }
-        }
-
-
-        # ==================================================
-        # SUMMARY
-        # ==================================================
 
         $summary = [PSCustomObject]@{
-            Hostname        = $inventory.Hostname
-            Status          = $status
-            ADFound         = $adFound
-            Reachable       = $reachable
-            OperatingSystem = $operatingSystem
-            Model           = $computerModel
-            MemoryGB        = $memoryGB
-            Processor       = $processorName
-            BitLockerStatus = $bitLockerStatus
-            ErrorCount      = $errors.Count
-            SimulationMode  = [bool]$SimulationMode
+            Hostname = $inventory.Hostname; Status = $status; ADFound = $adFound; Reachable = $reachable
+            OperatingSystem = if ($mode -eq "Real") { $inventory.OperatingSystem.Caption } else { $null }
+            Model = if ($mode -eq "Real") { $inventory.System.Model } else { $null }
+            MemoryGB = if ($mode -eq "Real") { $inventory.Memory.TotalGB } else { $null }
+            Processor = if ($mode -eq "Real") { $inventory.Processor.Name } else { $null }
+            BitLockerStatus = if ($mode -eq "Real" -and $null -ne $inventory.BitLocker) { $inventory.BitLocker.Status } else { "NotCollected" }
+            ErrorCount = $errors.Count; SimulationMode = $isSimulated; Preview = ($mode -eq "Preview")
+            Mode = $mode; Cancelled = $false; IsSimulated = $isSimulated
+            Success = [bool]$coreResult.Success; Errors = $errors
+            CollectionStatus = $collectionStatus
+            QueryStatus = $queryStatus
+            ADQueryStatus = $adQueryStatus
+            ConnectivityStatus = $connectivityStatus
         }
 
-
-        # ==================================================
-        # MANAGEMENT RESULT
-        # ==================================================
-
-        return [PSCustomObject]@{
-            Success        = [bool]$coreResult.Success
-            Hostname       = $inventory.Hostname
-            SimulationMode = [bool]$SimulationMode
-            Status         = $status
-            Summary        = $summary
-            Data           = $inventory
-            Errors         = $errors
+        [PSCustomObject]@{
+            Success = [bool]$coreResult.Success; Hostname = $inventory.Hostname
+            SimulationMode = $isSimulated; Preview = ($mode -eq "Preview"); Mode = $mode
+            Status = $status; Cancelled = $false; CollectionStatus = $collectionStatus
+            QueryStatus = $queryStatus; Summary = $summary; Data = $inventory; Errors = $errors
         }
     }
     catch {
-
-        return [PSCustomObject]@{
-            Success        = $false
-            Hostname       = $hostnameNormalized
-            SimulationMode = [bool]$SimulationMode
-            Status         = "Error"
-            Summary        = $null
-            Data           = $null
-            Errors         = @(
-                [PSCustomObject]@{
-                    Source  = "ComputerManagement"
-                    Message = $_.Exception.Message
-                }
-            )
+        [PSCustomObject]@{
+            Success = $false; Hostname = $hostnameNormalized; SimulationMode = ($mode -eq "Simulation")
+            Preview = ($mode -eq "Preview"); Mode = "Error"; Status = "Error"; Cancelled = $false
+            CollectionStatus = "Error"; QueryStatus = $null; Summary = $null; Data = $null
+            Errors = @([PSCustomObject]@{ Source = "ComputerManagement"; Message = $_.Exception.Message })
         }
     }
 }
 
-
 function Get-ComputerManagementSummary {
-
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Low')]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string]$Hostname,
-
-        [switch]$SimulationMode
+        [switch]$SimulationMode,
+        [switch]$Preview,
+        [switch]$AllowRealOperation
     )
 
-    $result = Get-ComputerManagement `
-        -Hostname $Hostname `
-        -SimulationMode:$SimulationMode
-
-    if ($null -eq $result) {
-        return $null
+    $whatIfRequested = [bool]$WhatIfPreference
+    $conflictingModes = ($SimulationMode -and ($Preview -or $whatIfRequested -or $AllowRealOperation)) -or ($Preview -and $AllowRealOperation)
+    if ($conflictingModes) {
+        return [PSCustomObject]@{
+            Hostname = $Hostname; Status = "Error"; ADFound = $null; Reachable = $null
+            OperatingSystem = $null; Model = $null; MemoryGB = $null; Processor = $null
+            BitLockerStatus = "NotCollected"; ErrorCount = 1; SimulationMode = $false
+            Preview = $false; Mode = "Error"; Cancelled = $false; Success = $false
+            Errors = @([PSCustomObject]@{ Source = "ComputerManagement"; Message = "Modos conflitantes; nenhuma consulta foi realizada." })
+            IsSimulated = $false; CollectionStatus = "Error"; QueryStatus = $null
+            ADQueryStatus = "NotQueried"; ConnectivityStatus = "NotQueried"
+        }
     }
 
-    return $result.Summary
+    $arguments = @{ Hostname = $Hostname }
+    if ($SimulationMode) { $arguments.SimulationMode = $true }
+    elseif ($Preview -or $whatIfRequested) { $arguments.Preview = $true }
+    elseif ($AllowRealOperation) { $arguments.AllowRealOperation = $true; $arguments.Confirm = $false }
+    $result = Get-ComputerManagement @arguments
+    if ($null -eq $result) { return $null }
+    if ($null -ne $result.Summary) { return $result.Summary }
+
+    [PSCustomObject]@{
+        Hostname = $result.Hostname; Status = $result.Status; ADFound = $null; Reachable = $null
+        OperatingSystem = $null; Model = $null; MemoryGB = $null; Processor = $null
+        BitLockerStatus = "NotCollected"; ErrorCount = @($result.Errors).Count
+        SimulationMode = [bool]$result.SimulationMode; Preview = [bool]$result.Preview
+        Mode = $result.Mode; Cancelled = [bool]$result.Cancelled; Success = [bool]$result.Success
+        Errors = @($result.Errors); IsSimulated = ($result.Mode -eq "Simulation")
+        CollectionStatus = $result.CollectionStatus; QueryStatus = $result.QueryStatus
+        ADQueryStatus = "NotQueried"; ConnectivityStatus = "NotQueried"
+    }
 }
 
-
 function Test-ComputerManagement {
-
     [CmdletBinding()]
     param()
 
-    $coreFunctionAvailable = $null -ne (
-        Get-Command Get-ComputerInventory -ErrorAction SilentlyContinue
-    )
-
-    $managementFunctionAvailable = $null -ne (
-        Get-Command Get-ComputerManagement -ErrorAction SilentlyContinue
-    )
-
+    $coreFunctionAvailable = ($null -ne $script:ComputerCoreInventoryCommand -and
+        $script:ComputerCoreInventoryCommand.Module -eq $script:ComputerCoreModule)
+    $managementFunctionAvailable = $null -ne (Get-Command Get-ComputerManagement -ErrorAction SilentlyContinue)
     [PSCustomObject]@{
-        Success = (
-            $coreFunctionAvailable -and
-            $managementFunctionAvailable
-        )
-
+        Success = ($coreFunctionAvailable -and $managementFunctionAvailable)
         ComputerCoreAvailable = $coreFunctionAvailable
-
         ManagementAvailable = $managementFunctionAvailable
-
         ModulePath = $PSCommandPath
-
         ComputerCorePath = $script:ComputerCorePath
     }
 }
 
-
-Export-ModuleMember -Function @(
-    "Get-ComputerManagement",
-    "Get-ComputerManagementSummary",
-    "Test-ComputerManagement"
-)
+Export-ModuleMember -Function @("Get-ComputerManagement", "Get-ComputerManagementSummary", "Test-ComputerManagement")

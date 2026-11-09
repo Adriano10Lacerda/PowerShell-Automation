@@ -7,8 +7,8 @@ function Test-ADGroupConfiguration {
 
     $Errors = @()
 
-    if ($null -eq $Configuration.SimulationMode) {
-        $Errors += "A configuração 'SimulationMode' não foi definida."
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        $Errors += "A configuração 'SimulationMode' deve ser um valor Booleano explícito."
     }
 
     if ($null -eq $Configuration.ActiveDirectory) {
@@ -55,13 +55,57 @@ function Test-ADGroupConfiguration {
     return $true
 }
 
+function Assert-ADGroupOperationAuthorization {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("CreateGroup", "AddMember", "RemoveMember", "ListMembers", "CheckGroup")]
+        [string]$Operation,
+
+        [switch]$AllowRealOperation
+    )
+
+    Test-ADGroupConfiguration -Configuration $Configuration | Out-Null
+
+    $OperationFlag = $Configuration.Operations.PSObject.Properties[$Operation]
+    if ($null -eq $OperationFlag -or $OperationFlag.Value -isnot [bool] -or $OperationFlag.Value -ne $true) {
+        throw "A operação '$Operation' não está explicitamente habilitada em Configuration.Operations."
+    }
+
+    if ($Configuration.SimulationMode) {
+        return
+    }
+
+    if (-not $AllowRealOperation) {
+        throw "A operação real '$Operation' foi bloqueada. É necessário informar -AllowRealOperation."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Configuration.ActiveDirectory.DomainController)) {
+        throw "O 'DomainController' é obrigatório para operações reais."
+    }
+}
+
 
 function Test-ADGroupConnectivity {
 
     param (
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("CreateGroup", "AddMember", "RemoveMember", "ListMembers", "CheckGroup")]
+        [string]$Operation,
+
+        [switch]$AllowRealOperation
     )
+
+    Assert-ADGroupOperationAuthorization `
+        -Configuration $Configuration `
+        -Operation $Operation `
+        -AllowRealOperation:$AllowRealOperation
 
     if ($Configuration.SimulationMode -eq $true) {
 
@@ -72,15 +116,19 @@ function Test-ADGroupConnectivity {
         }
     }
 
+    if (-not $AllowRealOperation) {
+        throw "A consulta de conectividade real foi bloqueada. É necessário informar -AllowRealOperation."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Configuration.ActiveDirectory.DomainController)) {
+        throw "O 'DomainController' é obrigatório quando o modo de simulação está desabilitado."
+    }
+
     if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
         throw "O módulo 'ActiveDirectory' não está instalado ou disponível neste computador."
     }
 
     Import-Module ActiveDirectory -ErrorAction Stop
-
-    if ([string]::IsNullOrWhiteSpace($Configuration.ActiveDirectory.DomainController)) {
-        throw "O 'DomainController' é obrigatório quando o modo de simulação está desabilitado."
-    }
 
     try {
 
@@ -123,15 +171,26 @@ function Get-SimulatedADGroup {
 }
 
 
-function Test-ADGroupExists {
+function Test-ADGroupExistsInternal {
 
     param (
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("CreateGroup", "AddMember", "RemoveMember", "ListMembers", "CheckGroup")]
+        [string]$Operation,
+
+        [switch]$AllowRealOperation
     )
+
+    Assert-ADGroupOperationAuthorization `
+        -Configuration $Configuration `
+        -Operation $Operation `
+        -AllowRealOperation:$AllowRealOperation
 
     if ($Configuration.SimulationMode -eq $true) {
 
@@ -141,6 +200,11 @@ function Test-ADGroupExists {
 
         return ($null -ne $Group)
     }
+
+    Test-ADGroupConnectivity `
+        -Configuration $Configuration `
+        -Operation $Operation `
+        -AllowRealOperation:$AllowRealOperation | Out-Null
 
     if (-not (Get-Command Get-ADGroup -ErrorAction SilentlyContinue)) {
         throw "O comando 'Get-ADGroup' não está disponível."
@@ -165,9 +229,30 @@ function Test-ADGroupExists {
     }
 }
 
+function Test-ADGroupExists {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$GroupName,
+
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
+    )
+
+    Test-ADGroupExistsInternal `
+        -GroupName $GroupName `
+        -Configuration $Configuration `
+        -Operation CheckGroup `
+        -AllowRealOperation:$AllowRealOperation
+}
+
 
 function Test-ADGroupMember {
 
+    [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
@@ -176,8 +261,16 @@ function Test-ADGroupMember {
         [string]$UserName,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
+
+    Test-ADGroupConfiguration -Configuration $Configuration | Out-Null
+    Assert-ADGroupOperationAuthorization `
+        -Configuration $Configuration `
+        -Operation ListMembers `
+        -AllowRealOperation:$AllowRealOperation
 
     if ($Configuration.SimulationMode -eq $true) {
 
@@ -207,6 +300,11 @@ function Test-ADGroupMember {
             }
         }
     }
+
+    Test-ADGroupConnectivity `
+        -Configuration $Configuration `
+        -Operation ListMembers `
+        -AllowRealOperation:$AllowRealOperation | Out-Null
 
     try {
 
@@ -239,13 +337,22 @@ function Test-ADGroupMember {
 
 function Get-ADGroupMembers {
 
+    [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
+
+    Test-ADGroupConfiguration -Configuration $Configuration | Out-Null
+    Assert-ADGroupOperationAuthorization `
+        -Configuration $Configuration `
+        -Operation ListMembers `
+        -AllowRealOperation:$AllowRealOperation
 
     if ($Configuration.SimulationMode -eq $true) {
 
@@ -271,6 +378,11 @@ function Get-ADGroupMembers {
         return $Members
     }
 
+    Test-ADGroupConnectivity `
+        -Configuration $Configuration `
+        -Operation ListMembers `
+        -AllowRealOperation:$AllowRealOperation | Out-Null
+
     try {
 
         return @(Get-ADGroupMember `
@@ -287,6 +399,7 @@ function Get-ADGroupMembers {
 
 function New-ADGroupProvision {
 
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
     param (
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
@@ -295,8 +408,19 @@ function New-ADGroupProvision {
         [string]$Description,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
+
+    Assert-ADGroupOperationAuthorization `
+        -Configuration $Configuration `
+        -Operation CreateGroup `
+        -AllowRealOperation:$AllowRealOperation
+
+    if ([string]::IsNullOrWhiteSpace($GroupName)) {
+        throw "O nome do grupo é obrigatório."
+    }
 
     if ($Configuration.Group.RequireDescription -eq $true) {
 
@@ -305,14 +429,24 @@ function New-ADGroupProvision {
         }
     }
 
-    if (Test-ADGroupExists `
-        -GroupName $GroupName `
-        -Configuration $Configuration) {
-
-        throw "O grupo '$GroupName' já existe."
+    if (-not $PSCmdlet.ShouldProcess($GroupName, "Criar grupo")) {
+        return [PSCustomObject]@{
+            Success    = $false
+            Simulation = $Configuration.SimulationMode
+            Operation  = "CreateGroup"
+            GroupName  = $GroupName
+            Message    = "A criação do grupo não foi realizada."
+        }
     }
 
     if ($Configuration.SimulationMode -eq $true) {
+        if (Test-ADGroupExistsInternal `
+            -GroupName $GroupName `
+            -Configuration $Configuration `
+            -Operation CreateGroup `
+            -AllowRealOperation:$AllowRealOperation) {
+            throw "O grupo '$GroupName' já existe."
+        }
 
         $NewGroup = [PSCustomObject]@{
             Name        = $GroupName
@@ -334,6 +468,15 @@ function New-ADGroupProvision {
         }
     }
 
+    if (Test-ADGroupExistsInternal `
+        -GroupName $GroupName `
+        -Configuration $Configuration `
+        -Operation CreateGroup `
+        -AllowRealOperation:$AllowRealOperation) {
+
+        throw "O grupo '$GroupName' já existe."
+    }
+
     try {
 
         $Parameters = @{
@@ -342,6 +485,7 @@ function New-ADGroupProvision {
             GroupScope    = $Configuration.Group.DefaultScope
             GroupCategory = $Configuration.Group.DefaultCategory
             Server        = $Configuration.ActiveDirectory.DomainController
+            Confirm       = $false
             ErrorAction   = "Stop"
         }
 
@@ -369,6 +513,7 @@ function New-ADGroupProvision {
 
 function Add-ADGroupMemberProvision {
 
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
     param (
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
@@ -377,8 +522,30 @@ function Add-ADGroupMemberProvision {
         [string]$UserName,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
+
+    Assert-ADGroupOperationAuthorization `
+        -Configuration $Configuration `
+        -Operation AddMember `
+        -AllowRealOperation:$AllowRealOperation
+
+    if ([string]::IsNullOrWhiteSpace($GroupName) -or [string]::IsNullOrWhiteSpace($UserName)) {
+        throw "GroupName e UserName são obrigatórios."
+    }
+
+    if (-not $PSCmdlet.ShouldProcess("$UserName em $GroupName", "Adicionar membro ao grupo")) {
+        return [PSCustomObject]@{
+            Success    = $false
+            Simulation = $Configuration.SimulationMode
+            Operation  = "AddMember"
+            GroupName  = $GroupName
+            UserName   = $UserName
+            Message    = "A adição do usuário não foi realizada."
+        }
+    }
 
     $Group = Get-SimulatedADGroup `
         -GroupName $GroupName `
@@ -410,9 +577,11 @@ function Add-ADGroupMemberProvision {
         }
     }
 
-    if (-not (Test-ADGroupExists `
+    if (-not (Test-ADGroupExistsInternal `
         -GroupName $GroupName `
-        -Configuration $Configuration)) {
+        -Configuration $Configuration `
+        -Operation AddMember `
+        -AllowRealOperation:$AllowRealOperation)) {
 
         throw "O grupo '$GroupName' não existe."
     }
@@ -423,6 +592,7 @@ function Add-ADGroupMemberProvision {
             -Identity $GroupName `
             -Members $UserName `
             -Server $Configuration.ActiveDirectory.DomainController `
+            -Confirm:$false `
             -ErrorAction Stop
 
         return [PSCustomObject]@{
@@ -443,6 +613,7 @@ function Add-ADGroupMemberProvision {
 
 function Remove-ADGroupMemberProvision {
 
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
     param (
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
@@ -451,8 +622,30 @@ function Remove-ADGroupMemberProvision {
         [string]$UserName,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
+
+    Assert-ADGroupOperationAuthorization `
+        -Configuration $Configuration `
+        -Operation RemoveMember `
+        -AllowRealOperation:$AllowRealOperation
+
+    if ([string]::IsNullOrWhiteSpace($GroupName) -or [string]::IsNullOrWhiteSpace($UserName)) {
+        throw "GroupName e UserName são obrigatórios."
+    }
+
+    if (-not $PSCmdlet.ShouldProcess("$UserName em $GroupName", "Remover membro do grupo")) {
+        return [PSCustomObject]@{
+            Success    = $false
+            Simulation = $Configuration.SimulationMode
+            Operation  = "RemoveMember"
+            GroupName  = $GroupName
+            UserName   = $UserName
+            Message    = "A remoção do usuário não foi realizada."
+        }
+    }
 
     $Group = Get-SimulatedADGroup `
         -GroupName $GroupName `
@@ -488,9 +681,11 @@ function Remove-ADGroupMemberProvision {
         }
     }
 
-    if (-not (Test-ADGroupExists `
+    if (-not (Test-ADGroupExistsInternal `
         -GroupName $GroupName `
-        -Configuration $Configuration)) {
+        -Configuration $Configuration `
+        -Operation RemoveMember `
+        -AllowRealOperation:$AllowRealOperation)) {
 
         throw "O grupo '$GroupName' não existe."
     }
@@ -522,6 +717,7 @@ function Remove-ADGroupMemberProvision {
 
 function Invoke-ADGroupManagement {
 
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
     param (
         [Parameter(Mandatory = $true)]
         [ValidateSet(
@@ -541,13 +737,26 @@ function Invoke-ADGroupManagement {
 
         [string]$UserName,
 
-        [string]$Description
+        [string]$Description,
+
+        [switch]$AllowRealOperation
     )
 
     Test-ADGroupConfiguration -Configuration $Configuration | Out-Null
 
     if ($Configuration.SimulationMode -eq $false) {
-        Test-ADGroupConnectivity -Configuration $Configuration | Out-Null
+        Assert-ADGroupOperationAuthorization `
+            -Configuration $Configuration `
+            -Operation $Operation `
+            -AllowRealOperation:$AllowRealOperation
+    }
+
+    $ShouldProcessParameters = @{}
+    if ($PSBoundParameters.ContainsKey("WhatIf")) {
+        $ShouldProcessParameters["WhatIf"] = $WhatIf
+    }
+    if ($PSBoundParameters.ContainsKey("Confirm")) {
+        $ShouldProcessParameters["Confirm"] = $Confirm
     }
 
     switch ($Operation) {
@@ -557,7 +766,9 @@ function Invoke-ADGroupManagement {
             return New-ADGroupProvision `
                 -GroupName $GroupName `
                 -Description $Description `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -AllowRealOperation:$AllowRealOperation `
+                @ShouldProcessParameters
         }
 
         "AddMember" {
@@ -569,7 +780,9 @@ function Invoke-ADGroupManagement {
             return Add-ADGroupMemberProvision `
                 -GroupName $GroupName `
                 -UserName $UserName `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -AllowRealOperation:$AllowRealOperation `
+                @ShouldProcessParameters
         }
 
         "RemoveMember" {
@@ -581,21 +794,25 @@ function Invoke-ADGroupManagement {
             return Remove-ADGroupMemberProvision `
                 -GroupName $GroupName `
                 -UserName $UserName `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -AllowRealOperation:$AllowRealOperation `
+                @ShouldProcessParameters
         }
 
         "ListMembers" {
 
             return Get-ADGroupMembers `
                 -GroupName $GroupName `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -AllowRealOperation:$AllowRealOperation
         }
 
         "CheckGroup" {
 
             $Exists = Test-ADGroupExists `
                 -GroupName $GroupName `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -AllowRealOperation:$AllowRealOperation
 
             return [PSCustomObject]@{
                 GroupName  = $GroupName
@@ -608,9 +825,8 @@ function Invoke-ADGroupManagement {
 
 
 Export-ModuleMember -Function `
-    Test-ADGroupConfiguration, `
-    Test-ADGroupConnectivity, `
-    Test-ADGroupExists, `
+Test-ADGroupConfiguration, `
+Test-ADGroupExists, `
     Test-ADGroupMember, `
     Get-ADGroupMembers, `
     New-ADGroupProvision, `

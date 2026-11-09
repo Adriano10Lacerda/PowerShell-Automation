@@ -90,7 +90,7 @@ Run the module test script from the repository root:
 .\07-GPO-Management\Test-GPOManagement.ps1
 ```
 
-The current test suite has passed 21 tests in simulation. These results do not, by themselves, verify operations against a real Active Directory environment.
+The checked-in harness contains 25 scenarios. A prior isolated run recorded 25/25 passing with fail-closed Group Policy stubs; this does not verify operations against a real Active Directory or Group Policy environment.
 
 ## Security Notes
 

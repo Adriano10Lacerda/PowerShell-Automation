@@ -28,6 +28,24 @@ if (-not (Test-Path -LiteralPath $modelsPath)) {
 
 . $modelsPath
 
+function New-GroupResultModel {
+    param(
+        [bool]$Success = $false,
+        [object]$Data = $null,
+        [string]$Error = "",
+        [bool]$SimulationMode = $false,
+        [ValidateSet('NotQueried','Found','NotFound','Error','Simulation')]
+        [string]$QueryStatus = 'NotQueried'
+    )
+    [PSCustomObject]@{
+        Success = $Success
+        Data = $Data
+        Error = $Error
+        SimulationMode = $SimulationMode
+        QueryStatus = $QueryStatus
+    }
+}
+
 function Get-GroupConfigurationValue {
     param(
         [Parameter(Mandatory = $true)]
@@ -104,6 +122,9 @@ function Test-GroupCoreConfiguration {
     if ($null -eq $Configuration.PSObject.Properties["SimulationMode"]) {
         $errors.Add("SimulationMode não encontrado.")
     }
+    elseif ($Configuration.SimulationMode -isnot [bool]) {
+        $errors.Add("SimulationMode deve ser Boolean.")
+    }
 
     if ($null -eq $Configuration.PSObject.Properties["ActiveDirectory"]) {
         $errors.Add("ActiveDirectory não encontrado.")
@@ -136,8 +157,19 @@ function Test-GroupCoreConfiguration {
 function Test-GroupCoreConnectivity {
     param(
         [Parameter(Mandatory = $true)]
-        [object]$Configuration
+        [object]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead
     )
+
+    if ($null -eq $Configuration -or $Configuration.SimulationMode -isnot [bool]) {
+        return New-GroupResultModel -Success $false -Error "SimulationMode deve ser definido explicitamente como Boolean." -SimulationMode $false
+    }
+    if (-not $Configuration.SimulationMode -and -not $AllowRealRead) {
+        return New-GroupResultModel -Success $false -Error "Consulta real bloqueada. Informe -AllowRealRead explicitamente." -SimulationMode $false
+    }
 
     if ([bool]$Configuration.SimulationMode) {
         return New-GroupResultModel `
@@ -194,12 +226,19 @@ function Test-GroupCoreConnectivity {
 }
 
 function Get-GroupADInfo {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
 
         [Parameter(Mandatory = $true)]
-        [object]$Configuration
+        [object]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
 
     $configurationErrors = Test-GroupCoreConfiguration `
@@ -213,6 +252,21 @@ function Get-GroupADInfo {
             -SimulationMode ([bool]$Configuration.SimulationMode)
     }
 
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        return New-GroupResultModel -Success $false -Data $null -Error "Configuração contraditória: SimulationMode não pode ser combinado com AllowRealRead." -SimulationMode $true -QueryStatus "NotQueried"
+    }
+    if ($Preview -or $WhatIfPreference) {
+        $previewResult = New-GroupResultModel -Success $true -Data $null -Error "" -SimulationMode ([bool]$Configuration.SimulationMode)
+        $previewResult.QueryStatus = "NotQueried"
+        $previewResult | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        return $previewResult
+    }
+    if (-not $Configuration.SimulationMode -and -not $AllowRealRead) {
+        $blocked = New-GroupResultModel -Success $false -Data $null -Error "Consulta real bloqueada. Informe -AllowRealRead explicitamente. AllowRealOperation não concede autorização de leitura." -SimulationMode $false
+        $blocked.QueryStatus = "NotQueried"
+        return $blocked
+    }
+
     if ([bool]$Configuration.SimulationMode) {
 
         $group = Get-SimulatedGroup `
@@ -224,7 +278,8 @@ function Get-GroupADInfo {
                 -Success $false `
                 -Data $null `
                 -Error "Grupo '$GroupName' não encontrado no Simulation Mode." `
-                -SimulationMode $true
+                -SimulationMode $true `
+                -QueryStatus "Simulation"
         }
 
         $memberCount = @($group.Members).Count
@@ -247,7 +302,8 @@ function Get-GroupADInfo {
             -Success $true `
             -Data $data `
             -Error "" `
-            -SimulationMode $true
+            -SimulationMode $true `
+            -QueryStatus "Simulation"
     }
 
     try {
@@ -261,6 +317,10 @@ function Get-GroupADInfo {
             -Server $domainController `
             -Properties Description, GroupCategory, GroupScope, DistinguishedName `
             -ErrorAction Stop
+
+        if ($null -eq $group) {
+            return New-GroupResultModel -Success $false -Data $null -Error "Grupo '$GroupName' não encontrado." -SimulationMode $false -QueryStatus "NotFound"
+        }
 
         $members = @(Get-ADGroupMember `
             -Identity $group `
@@ -281,29 +341,41 @@ function Get-GroupADInfo {
             MemberCount = $members.Count
         }
 
-        return New-GroupResultModel `
+        $result = New-GroupResultModel `
             -Success $true `
             -Data $data `
             -Error "" `
             -SimulationMode $false
+        $result.QueryStatus = "Found"
+        return $result
     }
     catch {
 
-        return New-GroupResultModel `
+        $status = if ($_.Exception.GetType().FullName -eq "Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException") { "NotFound" } else { "Error" }
+        $result = New-GroupResultModel `
             -Success $false `
             -Data $null `
             -Error $_.Exception.Message `
             -SimulationMode $false
+        $result.QueryStatus = $status
+        return $result
     }
 }
 
 function Get-GroupMembers {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
 
         [Parameter(Mandatory = $true)]
-        [object]$Configuration
+        [object]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
 
     $configurationErrors = Test-GroupCoreConfiguration `
@@ -317,6 +389,21 @@ function Get-GroupMembers {
             -SimulationMode ([bool]$Configuration.SimulationMode)
     }
 
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        return New-GroupResultModel -Success $false -Data @() -Error "Configuração contraditória: SimulationMode não pode ser combinado com AllowRealRead." -SimulationMode $true -QueryStatus "NotQueried"
+    }
+    if ($Preview -or $WhatIfPreference) {
+        $previewResult = New-GroupResultModel -Success $true -Data @() -Error "" -SimulationMode ([bool]$Configuration.SimulationMode)
+        $previewResult.QueryStatus = "NotQueried"
+        $previewResult | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        return $previewResult
+    }
+    if (-not $Configuration.SimulationMode -and -not $AllowRealRead) {
+        $blocked = New-GroupResultModel -Success $false -Data @() -Error "Consulta real bloqueada. Informe -AllowRealRead explicitamente. AllowRealOperation não concede autorização de leitura." -SimulationMode $false
+        $blocked.QueryStatus = "NotQueried"
+        return $blocked
+    }
+
     if ([bool]$Configuration.SimulationMode) {
 
         $group = Get-SimulatedGroup `
@@ -328,7 +415,8 @@ function Get-GroupMembers {
                 -Success $false `
                 -Data @() `
                 -Error "Grupo '$GroupName' não encontrado no Simulation Mode." `
-                -SimulationMode $true
+                -SimulationMode $true `
+                -QueryStatus "Simulation"
         }
 
         $members = foreach ($member in @($group.Members)) {
@@ -344,7 +432,8 @@ function Get-GroupMembers {
             -Success $true `
             -Data @($members) `
             -Error "" `
-            -SimulationMode $true
+            -SimulationMode $true `
+            -QueryStatus "Simulation"
     }
 
     try {
@@ -367,23 +456,29 @@ function Get-GroupMembers {
             }
         }
 
-        return New-GroupResultModel `
+        $result = New-GroupResultModel `
             -Success $true `
             -Data @($result) `
             -Error "" `
             -SimulationMode $false
+        $result.QueryStatus = "Found"
+        return $result
     }
     catch {
 
-        return New-GroupResultModel `
+        $status = if ($_.Exception.GetType().FullName -eq "Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException") { "NotFound" } else { "Error" }
+        $result = New-GroupResultModel `
             -Success $false `
             -Data @() `
             -Error $_.Exception.Message `
             -SimulationMode $false
+        $result.QueryStatus = $status
+        return $result
     }
 }
 
 function Get-GroupMembership {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
@@ -392,19 +487,43 @@ function Get-GroupMembership {
         [string]$SamAccountName,
 
         [Parameter(Mandatory = $true)]
-        [object]$Configuration
+        [object]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
+
+    $configurationErrors = Test-GroupCoreConfiguration -Configuration $Configuration
+    if ($configurationErrors.Count -gt 0) {
+        return New-GroupResultModel -Success $false -Data $null -Error ($configurationErrors -join ' ') -SimulationMode $false -QueryStatus 'NotQueried'
+    }
+
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        return New-GroupResultModel -Success $false -Data $null -Error "Configuração contraditória: SimulationMode não pode ser combinado com AllowRealRead." -SimulationMode $true -QueryStatus "NotQueried"
+    }
+    if ($Preview -or $WhatIfPreference) {
+        $previewResult = New-GroupResultModel -Success $true -Data $null -Error "" -SimulationMode ([bool]$Configuration.SimulationMode)
+        $previewResult.QueryStatus = "NotQueried"
+        $previewResult | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        return $previewResult
+    }
 
     $membersResult = Get-GroupMembers `
         -GroupName $GroupName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead `
+        -Preview:$Preview
 
     if (-not $membersResult.Success) {
         return New-GroupResultModel `
             -Success $false `
             -Data $false `
             -Error $membersResult.Error `
-            -SimulationMode $membersResult.SimulationMode
+            -SimulationMode $membersResult.SimulationMode `
+            -QueryStatus $membersResult.QueryStatus
     }
 
     $isMember = $false
@@ -431,40 +550,69 @@ function Get-GroupMembership {
         -Success $true `
         -Data $data `
         -Error "" `
-        -SimulationMode $membersResult.SimulationMode
+        -SimulationMode $membersResult.SimulationMode `
+        -QueryStatus $membersResult.QueryStatus
 }
 
 function Get-GroupInventory {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
 
         [Parameter(Mandatory = $true)]
-        [object]$Configuration
+        [object]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
+
+    $configurationErrors = Test-GroupCoreConfiguration -Configuration $Configuration
+    if ($configurationErrors.Count -gt 0) {
+        return New-GroupResultModel -Success $false -Data $null -Error ($configurationErrors -join ' ') -SimulationMode $false -QueryStatus 'NotQueried'
+    }
+
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        return New-GroupResultModel -Success $false -Data $null -Error "Configuração contraditória: SimulationMode não pode ser combinado com AllowRealRead." -SimulationMode $true -QueryStatus "NotQueried"
+    }
+    if ($Preview -or $WhatIfPreference) {
+        $previewResult = New-GroupResultModel -Success $true -Data $null -Error "" -SimulationMode ([bool]$Configuration.SimulationMode)
+        $previewResult.QueryStatus = "NotQueried"
+        $previewResult | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        return $previewResult
+    }
 
     $groupResult = Get-GroupADInfo `
         -GroupName $GroupName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead `
+        -Preview:$Preview
 
     if (-not $groupResult.Success) {
         return New-GroupResultModel `
             -Success $false `
             -Data $null `
             -Error $groupResult.Error `
-            -SimulationMode $groupResult.SimulationMode
+            -SimulationMode $groupResult.SimulationMode `
+            -QueryStatus $groupResult.QueryStatus
     }
 
     $membersResult = Get-GroupMembers `
         -GroupName $GroupName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead `
+        -Preview:$Preview
 
     if (-not $membersResult.Success) {
         return New-GroupResultModel `
             -Success $false `
             -Data $null `
             -Error $membersResult.Error `
-            -SimulationMode $membersResult.SimulationMode
+            -SimulationMode $membersResult.SimulationMode `
+            -QueryStatus $membersResult.QueryStatus
     }
 
     $inventory = New-GroupInventoryModel `
@@ -482,7 +630,8 @@ function Get-GroupInventory {
         -Success $true `
         -Data $inventory `
         -Error "" `
-        -SimulationMode $groupResult.SimulationMode
+        -SimulationMode $groupResult.SimulationMode `
+        -QueryStatus $groupResult.QueryStatus
 }
 
 Export-ModuleMember -Function `

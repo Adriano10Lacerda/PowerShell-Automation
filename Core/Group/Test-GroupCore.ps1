@@ -46,16 +46,8 @@ Test-Result `
 # TESTE 2 - Arquivo de configuração
 # ---------------------------------------------------------
 
-Test-Result `
-    -Name "Group-Configuration.json existe" `
-    -Condition (Test-Path -LiteralPath $configPath)
-
 if (-not (Test-Path -LiteralPath $functionsPath)) {
     throw "Group-Functions.psm1 não encontrado."
-}
-
-if (-not (Test-Path -LiteralPath $configPath)) {
-    throw "Group-Configuration.json não encontrado."
 }
 
 # ---------------------------------------------------------
@@ -63,11 +55,69 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 # ---------------------------------------------------------
 
 Import-Module $functionsPath -Force -ErrorAction Stop
+$groupCoreModule = Get-Module | Where-Object { $_.Path -eq [System.IO.Path]::GetFullPath($functionsPath) } | Select-Object -First 1
+if ($null -eq $groupCoreModule) { throw "Group Core não foi localizado após importação." }
+& $groupCoreModule {
+    $script:ExternalCallCounts = @{ GetModule=0; ImportModule=0; GetADDomain=0; GetADGroup=0; GetADGroupMember=0 }
+    $script:GroupFixtureMode = 'Success'
+    Set-Item Function:\script:Get-Module { param([string]$Name,[switch]$ListAvailable); if ($Name -eq 'ActiveDirectory') { $script:ExternalCallCounts.GetModule++; return [PSCustomObject]@{Name='ActiveDirectory'} }; Microsoft.PowerShell.Core\Get-Module @PSBoundParameters } -Force
+    Set-Item Function:\script:Import-Module { param([string]$Name,[string]$ErrorAction); if ($Name -eq 'ActiveDirectory') { $script:ExternalCallCounts.ImportModule++; return }; Microsoft.PowerShell.Core\Import-Module @PSBoundParameters } -Force
+    Set-Item Function:\script:Get-ADDomain { param([string]$Server,[string]$ErrorAction); $script:ExternalCallCounts.GetADDomain++; [PSCustomObject]@{DNSRoot='fixture.invalid';DomainMode='Windows2016Domain'} } -Force
+    Set-Item Function:\script:Get-ADGroup { param([string]$Identity,[string]$Server,[string[]]$Properties,[string]$ErrorAction); $script:ExternalCallCounts.GetADGroup++; if ($script:GroupFixtureMode -eq 'Error') { throw 'Fixture group query failure' }; if ($script:GroupFixtureMode -eq 'Null') { return $null }; [PSCustomObject]@{Name='Fixture Group';SamAccountName='Fixture Group';Description='fixture';GroupCategory='Security';GroupScope='Global';DistinguishedName='CN=Fixture'} } -Force
+    Set-Item Function:\script:Get-ADGroupMember { param($Identity,[string]$Server,[string]$ErrorAction); $script:ExternalCallCounts.GetADGroupMember++; @([PSCustomObject]@{SamAccountName='fixture.user';Name='Fixture User';objectClass='user'}) } -Force
+}
+$groupCoreStubResolution = & $groupCoreModule {
+    [PSCustomObject]@{
+        Group = (Get-Command Get-ADGroup -CommandType Function -ErrorAction SilentlyContinue).CommandType
+        Members = (Get-Command Get-ADGroupMember -CommandType Function -ErrorAction SilentlyContinue).CommandType
+        Loader = (Get-Command Import-Module -CommandType Function -ErrorAction SilentlyContinue).CommandType
+    }
+}
+Test-Result -Name "Group Core resolve comandos AD e loader para stubs" -Condition ($groupCoreStubResolution.Group -eq 'Function' -and $groupCoreStubResolution.Members -eq 'Function' -and $groupCoreStubResolution.Loader -eq 'Function')
 
-$config = Get-Content `
-    -LiteralPath $configPath `
-    -Raw `
-    -ErrorAction Stop | ConvertFrom-Json
+$config = [PSCustomObject]@{
+    SimulationMode = $true
+    ActiveDirectory = [PSCustomObject]@{ DomainController = 'fixture.invalid' }
+    Group = [PSCustomObject]@{ DefaultCategory = 'Security'; DefaultScope = 'Global' }
+    Simulation = [PSCustomObject]@{
+        ExistingGroups = @(
+            [PSCustomObject]@{ Name='TI-Suporte'; Description='Grupo de suporte de TI'; Members=@('maria.santos') },
+            [PSCustomObject]@{ Name='TI-Infraestrutura'; Description='Grupo de infraestrutura'; Members=@('carlos.oliveira') },
+            [PSCustomObject]@{ Name='Administradores'; Description='Administradores'; Members=@('joao.silva') }
+        )
+        ExistingUsers = @('maria.santos','joao.silva','carlos.oliveira')
+    }
+}
+
+$realConfig = [PSCustomObject]@{ SimulationMode=$false; ActiveDirectory=[PSCustomObject]@{DomainController='fixture.invalid'}; Group=[PSCustomObject]@{DefaultCategory='Security';DefaultScope='Global'}; Simulation=[PSCustomObject]@{ExistingGroups=@();ExistingUsers=@()} }
+$countsBeforeGates = & $groupCoreModule { @{} + $script:ExternalCallCounts }
+Test-Result -Name "Caminhos simulados anteriores não chamaram fronteiras" -Condition (($countsBeforeGates.Values | Measure-Object -Sum).Sum -eq 0)
+$blockedGroupRead = Get-GroupADInfo -GroupName 'Fixture Group' -Configuration $realConfig
+$countsAfterBlockedRead = & $groupCoreModule { @{} + $script:ExternalCallCounts }
+Test-Result -Name "Group read sem autorização falha fechada" -Condition (-not $blockedGroupRead.Success -and $blockedGroupRead.Error -match 'AllowRealRead')
+Test-Result -Name "Group read sem autorização não chama fronteiras" -Condition (($countsBeforeGates.Values | Measure-Object -Sum).Sum -eq ($countsAfterBlockedRead.Values | Measure-Object -Sum).Sum)
+$previewGroupRead = Get-GroupInventory -GroupName 'Fixture Group' -Configuration $realConfig -WhatIf
+$countsAfterWhatIf = & $groupCoreModule { @{} + $script:ExternalCallCounts }
+Test-Result -Name "Group WhatIf não consulta" -Condition ($previewGroupRead.Mode -eq 'Preview' -and $previewGroupRead.QueryStatus -eq 'NotQueried')
+Test-Result -Name "Group WhatIf mantém contadores" -Condition (($countsAfterWhatIf.Values | Measure-Object -Sum).Sum -eq ($countsAfterBlockedRead.Values | Measure-Object -Sum).Sum)
+$conflictingConfig = Get-GroupADInfo -GroupName 'TI-Suporte' -Configuration $config -AllowRealRead
+$countsAfterConflict = & $groupCoreModule { @{} + $script:ExternalCallCounts }
+Test-Result -Name "Simulation com autorização real é rejeitada" -Condition (-not $conflictingConfig.Success -and $conflictingConfig.Error -match 'contradit')
+Test-Result -Name "Combinação conflitante não chama fronteiras" -Condition (($countsAfterConflict.Values | Measure-Object -Sum).Sum -eq ($countsAfterWhatIf.Values | Measure-Object -Sum).Sum)
+$fixtureGroupRead = Get-GroupADInfo -GroupName 'Fixture Group' -Configuration $realConfig -AllowRealRead
+$countsAfterFixtureRead = & $groupCoreModule { @{} + $script:ExternalCallCounts }
+Test-Result -Name "Group real autorizado retorna fixture" -Condition ($fixtureGroupRead.Success -and $fixtureGroupRead.QueryStatus -eq 'Found')
+Test-Result -Name "Group real autorizado usou stubs contados" -Condition ($countsAfterFixtureRead.GetADGroup -eq 1 -and $countsAfterFixtureRead.GetADGroupMember -eq 1 -and $countsAfterFixtureRead.ImportModule -eq 1)
+$whatIfConflict = Get-GroupADInfo -GroupName 'Fixture Group' -Configuration $config -AllowRealRead -WhatIf
+$countsAfterWhatIfConflict = & $groupCoreModule { @{} + $script:ExternalCallCounts }
+Test-Result -Name "WhatIf conflitante falha antes de fronteiras externas" -Condition (-not $whatIfConflict.Success -and (($countsAfterWhatIfConflict.Values | Measure-Object -Sum).Sum -eq ($countsAfterFixtureRead.Values | Measure-Object -Sum).Sum))
+& $groupCoreModule { $script:GroupFixtureMode='Error' }
+$groupErrorFixture = Get-GroupADInfo -GroupName 'Fixture Group' -Configuration $realConfig -AllowRealRead
+Test-Result -Name "Erro AD fixture preserva estado Error" -Condition (-not $groupErrorFixture.Success -and $groupErrorFixture.QueryStatus -eq 'Error')
+& $groupCoreModule { $script:GroupFixtureMode='Null' }
+$groupNullFixture = Get-GroupADInfo -GroupName 'Fixture Group' -Configuration $realConfig -AllowRealRead
+Test-Result -Name "Resultado nulo normal distingue NotFound" -Condition (-not $groupNullFixture.Success -and $groupNullFixture.QueryStatus -eq 'NotFound')
+& $groupCoreModule { $script:GroupFixtureMode='Success' }
 
 # ---------------------------------------------------------
 # TESTE 3 - SimulationMode

@@ -188,7 +188,7 @@ function New-UserManagementSummary {
 # ============================================================
 
 function Get-UserManagement {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -196,7 +196,13 @@ function Get-UserManagement {
 
         [Parameter(Mandatory)]
         [ValidateNotNull()]
-        $Configuration
+        $Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
 
     $result = [PSCustomObject]@{
@@ -228,10 +234,30 @@ function Get-UserManagement {
         # Simulation Mode
         # ----------------------------------------------------
 
-        if (
-            $null -ne $Configuration.PSObject.Properties["SimulationMode"]
-        ) {
+        if ($null -eq $Configuration.PSObject.Properties["SimulationMode"] -or $Configuration.SimulationMode -isnot [bool]) {
+            $result.Errors = @("SimulationMode deve ser definido explicitamente como Boolean.")
+            return $result
+        }
+        else {
             $result.SimulationMode = [bool]$Configuration.SimulationMode
+        }
+
+        if ($result.SimulationMode -and $AllowRealRead) {
+            $result.Errors = @("Configuração contraditória: SimulationMode não pode ser combinado com AllowRealRead.")
+            return $result
+        }
+
+        if ($Preview -or $WhatIfPreference) {
+            $result.Status = "Preview"
+            $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+            $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false
+            return $result
+        }
+
+        if (-not $result.SimulationMode -and -not $AllowRealRead) {
+            $result.Errors = @("Consulta real bloqueada. Informe -AllowRealRead explicitamente. AllowRealOperation não concede autorização de leitura.")
+            $result.Status = "Unauthorized"
+            return $result
         }
 
         # ----------------------------------------------------
@@ -240,7 +266,8 @@ function Get-UserManagement {
 
         $coreResult = Get-UserADInfo `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
 
         if ($null -eq $coreResult) {
 
@@ -248,6 +275,17 @@ function Get-UserManagement {
                 "User Core não retornou resultado."
             )
 
+            return $result
+        }
+
+        if ($coreResult.PSObject.Properties.Name -contains "QueryStatus") {
+            $result | Add-Member -NotePropertyName QueryStatus -NotePropertyValue $coreResult.QueryStatus -Force
+        }
+
+        if ($coreResult.QueryStatus -eq "NotFound") {
+            $result.Success = $false
+            $result.Status = "NotFound"
+            $result.Errors = @()
             return $result
         }
 
@@ -341,6 +379,19 @@ function Get-UserManagementSummary {
     try {
 
         if (-not $ManagementResult.Success) {
+
+            if (
+                $ManagementResult.PSObject.Properties.Name -contains "QueryStatus" -and
+                $ManagementResult.QueryStatus -eq "NotFound"
+            ) {
+                return [PSCustomObject]@{
+                    Success     = $false
+                    Data        = $null
+                    Error       = $null
+                    QueryStatus = "NotFound"
+                    Status      = "NotFound"
+                }
+            }
 
             $errorMessage = "Resultado do User Management inválido."
 

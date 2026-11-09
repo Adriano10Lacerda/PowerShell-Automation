@@ -3,6 +3,15 @@
   "DomainController": "",
   "TargetOU": "",
   "SimulationMode": true,
+  "Operations": {
+    "CreateUser": false
+  },
+  "RealOperations": {
+    "Enabled": false,
+    "Operations": {
+      "CreateUser": false
+    }
+  },
   "UserValidation": {
     "FirstName": {
       "MinLength": 2

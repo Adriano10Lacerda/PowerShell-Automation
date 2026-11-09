@@ -4,6 +4,11 @@
 # Script principal do Inventário de Computadores
 # ============================================
 
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
+param(
+    [switch]$AllowRealOperation
+)
+
 $ErrorActionPreference = "Stop"
 
 # ============================================
@@ -95,6 +100,7 @@ try {
 
     $Inventory = Get-ComputerInventory `
         -Configuration $Configuration `
+        -AllowRealOperation:$AllowRealOperation `
         -ErrorAction Stop
 }
 catch {
@@ -263,6 +269,9 @@ try {
     $ExportResult = Export-ComputerInventory `
         -Inventory $Inventory `
         -Configuration $Configuration `
+        -AllowRealOperation:$AllowRealOperation `
+        -WhatIf:$WhatIfPreference `
+        -Confirm:$Confirm `
         -ErrorAction Stop
 }
 catch {

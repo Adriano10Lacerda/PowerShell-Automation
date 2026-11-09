@@ -40,6 +40,15 @@ if (-not (Test-Path -LiteralPath $auditPath)) {
 Import-Module $groupCorePath -Force -ErrorAction Stop
 Import-Module $auditPath -Force -ErrorAction Stop
 
+function Invoke-GroupManagementShouldProcess {
+    param(
+        [Parameter(Mandatory)] [System.Management.Automation.PSCmdlet]$Cmdlet,
+        [Parameter(Mandatory)] [string]$Target,
+        [Parameter(Mandatory)] [string]$Action
+    )
+    return $Cmdlet.ShouldProcess($Target, $Action)
+}
+
 function New-GroupManagementResult {
     param(
         [bool]$Success = $false,
@@ -47,7 +56,9 @@ function New-GroupManagementResult {
         [string]$Error = "",
         [bool]$SimulationMode = $false,
         [bool]$Changed = $false,
-        [object]$Audit = $null
+        [object]$Audit = $null,
+        [ValidateSet('NotQueried','Found','NotFound','Error','Simulation')]
+        [string]$QueryStatus = 'NotQueried'
     )
 
     [PSCustomObject]@{
@@ -57,6 +68,7 @@ function New-GroupManagementResult {
         SimulationMode = $SimulationMode
         Changed        = $Changed
         Audit          = $Audit
+        QueryStatus    = $QueryStatus
     }
 }
 
@@ -112,6 +124,7 @@ function Set-SimulationGroupMembers {
         [object]$Group,
 
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [string[]]$Members
     )
 
@@ -217,6 +230,7 @@ function New-GroupAuditRecord {
 }
 
 function Get-GroupManagementPreview {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateSet("AddMember", "RemoveMember")]
@@ -229,32 +243,58 @@ function Get-GroupManagementPreview {
         [string]$SamAccountName,
 
         [Parameter(Mandatory = $true)]
-        [object]$Configuration
+        [object]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
+
+    if ($null -eq $Configuration -or $Configuration.SimulationMode -isnot [bool]) {
+        return New-GroupManagementResult -Success $false -Error "SimulationMode deve ser definido explicitamente como Boolean." -SimulationMode $false
+    }
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        return New-GroupManagementResult -Success $false -Error "Modos conflitantes: SimulationMode não pode ser combinado com AllowRealRead." -SimulationMode $true
+    }
+    if ($Preview -or $WhatIfPreference) {
+        $previewOnly = New-GroupManagementResult -Success $true -Data ([PSCustomObject]@{ Action=$Action; GroupName=$GroupName; SamAccountName=$SamAccountName; CurrentState="Unknown"; TargetState="Unknown"; CanExecute=$false; RequiresConfirm=$false }) -SimulationMode ([bool]$Configuration.SimulationMode)
+        $previewOnly | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        $previewOnly | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false
+        return $previewOnly
+    }
+    if (-not $Configuration.SimulationMode -and -not $AllowRealRead) {
+        return New-GroupManagementResult -Success $false -Error "Consulta real bloqueada. Informe -AllowRealRead explicitamente. AllowRealOperation não concede autorização de leitura." -SimulationMode $false
+    }
 
     $groupResult = Get-GroupADInfo `
         -GroupName $GroupName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead
 
     if (-not $groupResult.Success) {
 
         return New-GroupManagementResult `
             -Success $false `
             -Error $groupResult.Error `
-            -SimulationMode $groupResult.SimulationMode
+            -SimulationMode $groupResult.SimulationMode `
+            -QueryStatus $groupResult.QueryStatus
     }
 
     $membershipResult = Get-GroupMembership `
         -GroupName $GroupName `
         -SamAccountName $SamAccountName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead
 
     if (-not $membershipResult.Success) {
 
         return New-GroupManagementResult `
             -Success $false `
             -Error $membershipResult.Error `
-            -SimulationMode $membershipResult.SimulationMode
+            -SimulationMode $membershipResult.SimulationMode `
+            -QueryStatus $membershipResult.QueryStatus
     }
 
     $userExists = $false
@@ -273,15 +313,26 @@ function Get-GroupManagementPreview {
 
             $domainController = [string]$Configuration.ActiveDirectory.DomainController
 
-            $null = Get-ADUser `
+            $userResult = Get-ADUser `
                 -Identity $SamAccountName `
                 -Server $domainController `
                 -ErrorAction Stop
 
-            $userExists = $true
+            $userExists = ($null -ne $userResult)
+            $userQueryStatus = if ($userExists) { 'Found' } else { 'NotFound' }
         }
         catch {
-            $userExists = $false
+            if ($_.Exception.GetType().FullName -eq "Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException") {
+                $userExists = $false
+                $userQueryStatus = 'NotFound'
+            }
+            else {
+                return New-GroupManagementResult `
+                    -Success $false `
+                    -Error "Erro ao consultar o usuário '$SamAccountName' no Active Directory: $($_.Exception.Message)" `
+                    -SimulationMode $false `
+                    -QueryStatus "Error"
+            }
         }
     }
 
@@ -290,7 +341,8 @@ function Get-GroupManagementPreview {
         return New-GroupManagementResult `
             -Success $false `
             -Error "Usuário '$SamAccountName' não encontrado." `
-            -SimulationMode ([bool]$Configuration.SimulationMode)
+            -SimulationMode ([bool]$Configuration.SimulationMode) `
+            -QueryStatus $(if ($Configuration.SimulationMode) { 'Simulation' } else { $userQueryStatus })
     }
 
     $isMember = [bool]$membershipResult.Data.IsMember
@@ -305,7 +357,7 @@ function Get-GroupManagementPreview {
                 -SimulationMode ([bool]$Configuration.SimulationMode)
         }
 
-        $preview = [PSCustomObject]@{
+        $actionPreview = [PSCustomObject]@{
             Action          = "AddMember"
             GroupName       = $GroupName
             SamAccountName  = $SamAccountName
@@ -325,7 +377,7 @@ function Get-GroupManagementPreview {
                 -SimulationMode ([bool]$Configuration.SimulationMode)
         }
 
-        $preview = [PSCustomObject]@{
+        $actionPreview = [PSCustomObject]@{
             Action          = "RemoveMember"
             GroupName       = $GroupName
             SamAccountName  = $SamAccountName
@@ -338,11 +390,13 @@ function Get-GroupManagementPreview {
 
     return New-GroupManagementResult `
         -Success $true `
-        -Data $preview `
-        -SimulationMode ([bool]$Configuration.SimulationMode)
+        -Data $actionPreview `
+        -SimulationMode ([bool]$Configuration.SimulationMode) `
+        -QueryStatus $(if ($Configuration.SimulationMode) { 'Simulation' } else { 'Found' })
 }
 
 function Invoke-GroupAddMember {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
     param(
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
@@ -353,14 +407,46 @@ function Invoke-GroupAddMember {
         [Parameter(Mandatory = $true)]
         [object]$Configuration,
 
-        [switch]$Execute
+        [switch]$Execute,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$AllowRealWrite
     )
+
+    if ($null -eq $Configuration -or $Configuration.SimulationMode -isnot [bool]) {
+        return New-GroupManagementResult -Success $false -Error "SimulationMode deve ser definido explicitamente como Boolean." -SimulationMode $false
+    }
+    if ($Configuration.SimulationMode -and ($AllowRealRead -or $AllowRealWrite)) {
+        return New-GroupManagementResult -Success $false -Error "Modos conflitantes: SimulationMode não pode ser combinado com autorização real." -SimulationMode $true
+    }
+    if ($WhatIfPreference) {
+        $whatIf = New-GroupManagementResult -Success $true -Error "Pre-visualização WhatIf; nenhuma consulta ou alteração foi realizada." -SimulationMode $false
+        $whatIf | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        $whatIf | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false
+        return $whatIf
+    }
+    if (-not $Configuration.SimulationMode -and -not $AllowRealRead) {
+        return New-GroupManagementResult -Success $false -Error "Leitura real bloqueada. Informe -AllowRealRead explicitamente." -SimulationMode $false
+    }
+    if (-not $Configuration.SimulationMode -and $Execute -and -not $AllowRealWrite) {
+        return New-GroupManagementResult -Success $false -Error "Escrita real bloqueada. Informe -AllowRealWrite; Execute e AllowRealOperation não são autorização." -SimulationMode $false
+    }
+    if (-not $Configuration.SimulationMode -and $Execute -and -not (Invoke-GroupManagementShouldProcess -Cmdlet $PSCmdlet -Target "$GroupName/$SamAccountName" -Action "Adicionar membro ao grupo")) {
+        $cancelled = New-GroupManagementResult -Success $false -Error "Operação cancelada pelo ShouldProcess." -SimulationMode $false
+        $cancelled | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        $cancelled | Add-Member -NotePropertyName Cancelled -NotePropertyValue $true
+        return $cancelled
+    }
 
     $previewResult = Get-GroupManagementPreview `
         -Action "AddMember" `
         -GroupName $GroupName `
         -SamAccountName $SamAccountName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead
 
     if (-not $previewResult.Success) {
         return $previewResult
@@ -492,6 +578,7 @@ function Invoke-GroupAddMember {
 }
 
 function Invoke-GroupRemoveMember {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
     param(
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
@@ -502,14 +589,46 @@ function Invoke-GroupRemoveMember {
         [Parameter(Mandatory = $true)]
         [object]$Configuration,
 
-        [switch]$Execute
+        [switch]$Execute,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$AllowRealWrite
     )
+
+    if ($null -eq $Configuration -or $Configuration.SimulationMode -isnot [bool]) {
+        return New-GroupManagementResult -Success $false -Error "SimulationMode deve ser definido explicitamente como Boolean." -SimulationMode $false
+    }
+    if ($Configuration.SimulationMode -and ($AllowRealRead -or $AllowRealWrite)) {
+        return New-GroupManagementResult -Success $false -Error "Modos conflitantes: SimulationMode não pode ser combinado com autorização real." -SimulationMode $true
+    }
+    if ($WhatIfPreference) {
+        $whatIf = New-GroupManagementResult -Success $true -Error "Pre-visualização WhatIf; nenhuma consulta ou alteração foi realizada." -SimulationMode $false
+        $whatIf | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        $whatIf | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false
+        return $whatIf
+    }
+    if (-not $Configuration.SimulationMode -and -not $AllowRealRead) {
+        return New-GroupManagementResult -Success $false -Error "Leitura real bloqueada. Informe -AllowRealRead explicitamente." -SimulationMode $false
+    }
+    if (-not $Configuration.SimulationMode -and $Execute -and -not $AllowRealWrite) {
+        return New-GroupManagementResult -Success $false -Error "Escrita real bloqueada. Informe -AllowRealWrite; Execute e AllowRealOperation não são autorização." -SimulationMode $false
+    }
+    if (-not $Configuration.SimulationMode -and $Execute -and -not (Invoke-GroupManagementShouldProcess -Cmdlet $PSCmdlet -Target "$GroupName/$SamAccountName" -Action "Remover membro do grupo")) {
+        $cancelled = New-GroupManagementResult -Success $false -Error "Operação cancelada pelo ShouldProcess." -SimulationMode $false
+        $cancelled | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        $cancelled | Add-Member -NotePropertyName Cancelled -NotePropertyValue $true
+        return $cancelled
+    }
 
     $previewResult = Get-GroupManagementPreview `
         -Action "RemoveMember" `
         -GroupName $GroupName `
         -SamAccountName $SamAccountName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead
 
     if (-not $previewResult.Success) {
         return $previewResult
@@ -642,57 +761,105 @@ function Invoke-GroupRemoveMember {
 }
 
 function Get-GroupManagement {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
 
         [Parameter(Mandatory = $true)]
-        [object]$Configuration
+        [object]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
+
+    if ($null -eq $Configuration -or $Configuration.SimulationMode -isnot [bool]) {
+        return New-GroupManagementResult -Success $false -Error "SimulationMode deve ser definido explicitamente como Boolean." -SimulationMode $false
+    }
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        return New-GroupManagementResult -Success $false -Error "Modos conflitantes: SimulationMode não pode ser combinado com AllowRealRead." -SimulationMode $true
+    }
+    if ($Preview -or $WhatIfPreference) {
+        $previewResult = New-GroupManagementResult -Success $true -Error "Pré-visualização; nenhuma consulta foi realizada." -SimulationMode ([bool]$Configuration.SimulationMode)
+        $previewResult | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        $previewResult | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false
+        return $previewResult
+    }
 
     $inventoryResult = Get-GroupInventory `
         -GroupName $GroupName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead `
+        -Preview:$Preview
 
     if (-not $inventoryResult.Success) {
 
         return New-GroupManagementResult `
             -Success $false `
             -Error $inventoryResult.Error `
-            -SimulationMode $inventoryResult.SimulationMode
+            -SimulationMode $inventoryResult.SimulationMode `
+            -QueryStatus $inventoryResult.QueryStatus
     }
 
     return New-GroupManagementResult `
         -Success $true `
         -Data $inventoryResult.Data `
-        -SimulationMode $inventoryResult.SimulationMode
+        -SimulationMode $inventoryResult.SimulationMode `
+        -QueryStatus $inventoryResult.QueryStatus
 }
 
 function Get-GroupManagementMembers {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)]
         [string]$GroupName,
 
         [Parameter(Mandatory = $true)]
-        [object]$Configuration
+        [object]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$Preview
     )
+
+    if ($null -eq $Configuration -or $Configuration.SimulationMode -isnot [bool]) {
+        return New-GroupManagementResult -Success $false -Error "SimulationMode deve ser definido explicitamente como Boolean." -SimulationMode $false
+    }
+    if ($Configuration.SimulationMode -and $AllowRealRead) {
+        return New-GroupManagementResult -Success $false -Error "Modos conflitantes: SimulationMode não pode ser combinado com AllowRealRead." -SimulationMode $true
+    }
+    if ($Preview -or $WhatIfPreference) {
+        $previewResult = New-GroupManagementResult -Success $true -Data @() -Error "Pré-visualização; nenhuma consulta foi realizada." -SimulationMode ([bool]$Configuration.SimulationMode)
+        $previewResult | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"
+        $previewResult | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false
+        return $previewResult
+    }
 
     $membersResult = Get-GroupMembers `
         -GroupName $GroupName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead `
+        -Preview:$Preview
 
     if (-not $membersResult.Success) {
 
         return New-GroupManagementResult `
             -Success $false `
             -Error $membersResult.Error `
-            -SimulationMode $membersResult.SimulationMode
+            -SimulationMode $membersResult.SimulationMode `
+            -QueryStatus $membersResult.QueryStatus
     }
 
     return New-GroupManagementResult `
         -Success $true `
         -Data @($membersResult.Data) `
-        -SimulationMode $membersResult.SimulationMode
+        -SimulationMode $membersResult.SimulationMode `
+        -QueryStatus $membersResult.QueryStatus
 }
 
 Export-ModuleMember -Function `

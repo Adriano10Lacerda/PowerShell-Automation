@@ -1,3 +1,7 @@
+param (
+    [switch]$AllowRealRead
+)
+
 $ErrorActionPreference = "Stop"
 
 $ModulePath = Join-Path $PSScriptRoot "Entra-Functions.psm1"
@@ -50,8 +54,13 @@ try {
         Write-Host "REAL Entra ID operation selected." -ForegroundColor Red
         Write-Host ""
 
+        if (-not $AllowRealRead) {
+            throw "Consulta real bloqueada. Informe -AllowRealRead explicitamente para esta execução."
+        }
+
         $Connection = Test-EntraTenantConnection `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead
 
         Write-Host "Tenant connection validated successfully." -ForegroundColor Green
         Write-Host ""
@@ -161,7 +170,8 @@ try {
 
     $ExistingUser = Test-EntraUserExists `
         -Configuration $Configuration `
-        -UserPrincipalName $User.UserPrincipalName
+        -UserPrincipalName $User.UserPrincipalName `
+        -AllowRealRead:$AllowRealRead
 
     if ($ExistingUser) {
 
@@ -204,7 +214,10 @@ try {
 
     $Result = New-EntraUserProvision `
         -Configuration $Configuration `
-        -User $User
+        -User $User `
+        -AllowRealOperation:($Configuration.SimulationMode -eq $false) `
+        -AllowRealRead:$AllowRealRead `
+        -Confirm:$false
 
     # ============================================================
     # RESULT

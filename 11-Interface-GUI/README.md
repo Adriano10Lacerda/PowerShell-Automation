@@ -95,6 +95,7 @@ A interface oferece:
 
 
 \- Listagem de GPOs.
+\- Campo editável para informar o nome da GPO a consultar.
 
 \- Consulta de uma GPO específica.
 
@@ -194,13 +195,11 @@ Execute:
 
 
 
-\- Total de testes: 15
-
-\- Aprovados: 15
-
+\- Total de testes: 16
+\- Aprovados: 16
 \- Falhas: 0
 
-
+Resultado executado em 5 de novembro de 2026 com PowerShell 7.6.9.
 
 Os testes são estruturais e verificam itens como sintaxe, definição da janela WPF, validação do modo de simulação, presença das funções, tratamento de erros e conexão dos botões às ações.
 

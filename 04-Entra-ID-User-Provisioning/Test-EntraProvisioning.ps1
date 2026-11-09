@@ -578,7 +578,8 @@ try {
     try {
         $Result = Test-EntraUserPostProvisioning `
             -UserId $Scenario.UserId `
-            -ExpectedUser $ExpectedUser
+            -ExpectedUser $ExpectedUser `
+            -AllowRealRead
 
         $ActualPass = $true
     }
@@ -959,6 +960,181 @@ catch {
 Write-Host ""
 
 # ============================================
+# TESTES DE AUTORIZAÇÃO E ISOLAMENTO DO GRAPH
+# ============================================
+Write-Host "Teste 16.1 - SimulationMode obrigatório e Boolean"
+
+$OriginalGetMgUserForAuthorization = Get-Item Function:\global:Get-MgUser -ErrorAction SilentlyContinue
+$OriginalGetMgContextForAuthorization = Get-Item Function:\global:Get-MgContext -ErrorAction SilentlyContinue
+$OriginalNewMgUserForAuthorization = Get-Item Function:\global:New-MgUser -ErrorAction SilentlyContinue
+$global:EntraGuardUnexpectedGraphCalls = 0
+
+Set-Item -LiteralPath Function:\global:Get-MgUser -Value {
+    $global:EntraGuardUnexpectedGraphCalls++
+    throw "FAIL-CLOSED: Get-MgUser inesperado durante teste de autorização."
+} -Force
+Set-Item -LiteralPath Function:\global:Get-MgContext -Value {
+    $global:EntraGuardUnexpectedGraphCalls++
+    throw "FAIL-CLOSED: Get-MgContext inesperado durante teste de autorização."
+} -Force
+Set-Item -LiteralPath Function:\global:New-MgUser -Value {
+    $global:EntraGuardUnexpectedGraphCalls++
+    throw "FAIL-CLOSED: New-MgUser inesperado durante teste de autorização."
+} -Force
+
+try {
+    $InvalidSimulationConfigurations = @(
+        [PSCustomObject]@{},
+        [PSCustomObject]@{ SimulationMode = $null },
+        [PSCustomObject]@{ SimulationMode = "true" },
+        [PSCustomObject]@{ SimulationMode = 1 }
+    )
+
+    foreach ($InvalidSimulationConfiguration in $InvalidSimulationConfigurations) {
+        $TotalTests++
+        try {
+            $null = Test-EntraUserExists `
+                -UserPrincipalName "isolation-check@example.invalid" `
+                -Configuration $InvalidSimulationConfiguration
+
+            $FailedTests++
+            Write-Host "FALHOU - SimulationMode ausente ou não Boolean foi aceito." `
+                -ForegroundColor Red
+        }
+        catch {
+            if ($_.Exception.Message -match "SimulationMode") {
+                $PassedTests++
+                Write-Host "PASSOU - SimulationMode ausente ou não Boolean foi bloqueado." `
+                    -ForegroundColor Green
+            }
+            else {
+                $FailedTests++
+                Write-Host "FALHOU - Erro inesperado ao validar SimulationMode." `
+                    -ForegroundColor Red
+            }
+        }
+    }
+
+    $RealModeConfiguration = [PSCustomObject]@{
+        SimulationMode = $false
+        TenantId = "00000000-0000-0000-0000-000000000001"
+        Domain = "example.onmicrosoft.com"
+        UserPrincipalName = [PSCustomObject]@{
+            Domain = "example.onmicrosoft.com"
+        }
+        Simulation = [PSCustomObject]@{
+            ExistingUserPrincipalNames = @()
+        }
+    }
+
+    foreach ($ReadScenario in @(
+        [PSCustomObject]@{
+            Name = "Test-EntraUserExists"
+            Invoke = { Test-EntraUserExists -UserPrincipalName "fixture@example.invalid" -Configuration $RealModeConfiguration }
+        },
+        [PSCustomObject]@{
+            Name = "Test-EntraTenantConnection"
+            Invoke = { Test-EntraTenantConnection -Configuration $RealModeConfiguration }
+        },
+        [PSCustomObject]@{
+            Name = "Test-EntraUserPostProvisioning"
+            Invoke = { Test-EntraUserPostProvisioning -UserId "fixture-id" -ExpectedUser ([PSCustomObject]@{}) }
+        }
+    )) {
+        $TotalTests++
+        $BlockedBeforeGraph = $false
+        try {
+            & $ReadScenario.Invoke
+        }
+        catch {
+            $BlockedBeforeGraph = $_.Exception.Message -match "AllowRealRead"
+        }
+
+        if ($BlockedBeforeGraph -and $global:EntraGuardUnexpectedGraphCalls -eq 0) {
+            $PassedTests++
+            Write-Host "PASSOU - $($ReadScenario.Name) bloqueou leitura sem AllowRealRead." -ForegroundColor Green
+        }
+        else {
+            $FailedTests++
+            Write-Host "FALHOU - $($ReadScenario.Name) não falhou fechado antes do Graph." -ForegroundColor Red
+        }
+    }
+
+    $TotalTests++
+    try {
+        $null = New-EntraUserProvision `
+            -User $UserValid `
+            -Configuration $RealModeConfiguration `
+            -Confirm:$false
+
+        $FailedTests++
+        Write-Host "FALHOU - Provisionamento real sem -AllowRealOperation foi aceito." `
+            -ForegroundColor Red
+    }
+    catch {
+        if ($_.Exception.Message -match "AllowRealOperation" -and
+            $global:EntraGuardUnexpectedGraphCalls -eq 0) {
+            $PassedTests++
+            Write-Host "PASSOU - Provisionamento real sem autorização foi bloqueado antes do Graph." `
+                -ForegroundColor Green
+        }
+        else {
+            $FailedTests++
+            Write-Host "FALHOU - Falha inesperada ou chamada Graph antes da autorização." `
+                -ForegroundColor Red
+        }
+    }
+
+    $TotalTests++
+    try {
+        $WhatIfResult = New-EntraUserProvision `
+            -User $UserValid `
+            -Configuration $RealModeConfiguration `
+            -WhatIf
+
+        if ($WhatIfResult.Success -eq $false -and
+            $WhatIfResult.Mode -eq "Preview" -and
+            $WhatIfResult.Cancelled -eq $false -and
+            $WhatIfResult.Message -match "Nenhuma consulta ou alteração Graph" -and
+            $global:EntraGuardUnexpectedGraphCalls -eq 0) {
+            $PassedTests++
+            Write-Host "PASSOU - WhatIf bloqueou consultas e criação no Graph." `
+                -ForegroundColor Green
+        }
+        else {
+            $FailedTests++
+            Write-Host "FALHOU - WhatIf não bloqueou completamente a operação." `
+                -ForegroundColor Red
+        }
+    }
+    catch {
+        $FailedTests++
+        Write-Host "FALHOU - WhatIf lançou uma exceção inesperada." `
+            -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+    }
+}
+finally {
+    foreach ($SavedFunction in @(
+        [PSCustomObject]@{ Name = "Get-MgUser"; Item = $OriginalGetMgUserForAuthorization },
+        [PSCustomObject]@{ Name = "Get-MgContext"; Item = $OriginalGetMgContextForAuthorization },
+        [PSCustomObject]@{ Name = "New-MgUser"; Item = $OriginalNewMgUserForAuthorization }
+    )) {
+        $FunctionPath = "Function:\global:$($SavedFunction.Name)"
+        if ($null -ne $SavedFunction.Item) {
+            Set-Item -LiteralPath $FunctionPath -Value $SavedFunction.Item.ScriptBlock -Force
+        }
+        else {
+            Remove-Item -LiteralPath $FunctionPath -ErrorAction SilentlyContinue
+        }
+    }
+
+    Remove-Variable EntraGuardUnexpectedGraphCalls -Scope Global -ErrorAction SilentlyContinue
+}
+
+Write-Host ""
+
+# ============================================
 # TESTES 17 A 19 - MOCKS DO MICROSOFT GRAPH
 # ============================================
 
@@ -1103,7 +1279,10 @@ try {
 
         $Result17 = New-EntraUserProvision `
             -User $MockUser `
-            -Configuration $MockConfig
+            -Configuration $MockConfig `
+            -AllowRealOperation `
+            -AllowRealRead `
+            -Confirm:$false
 
         $Parameters17 = $global:EntraMockParameters
 
@@ -1152,7 +1331,10 @@ try {
 
         $null = New-EntraUserProvision `
             -User $MockUser `
-            -Configuration $MockConfig
+            -Configuration $MockConfig `
+            -AllowRealOperation `
+            -AllowRealRead `
+            -Confirm:$false
 
         $FailedTests++
 
@@ -1192,7 +1374,10 @@ try {
 
         $null = New-EntraUserProvision `
             -User $MockUser `
-            -Configuration $MockConfig
+            -Configuration $MockConfig `
+            -AllowRealOperation `
+            -AllowRealRead `
+            -Confirm:$false
 
         $FailedTests++
 

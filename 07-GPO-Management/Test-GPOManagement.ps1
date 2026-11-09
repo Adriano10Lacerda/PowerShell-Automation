@@ -3,7 +3,52 @@ $ErrorActionPreference = "Stop"
 # Caminhos
 $ScriptPath = $PSScriptRoot
 $ModulePath = Join-Path $ScriptPath "GPO-Functions.psm1"
-$ConfigPath = Join-Path $ScriptPath "GPO-Configuration.json"
+$GpoModule = $null
+$Configuration = [PSCustomObject]@{
+    SimulationMode = $true
+    ActiveDirectory = [PSCustomObject]@{
+        DomainController = ""
+        TargetDomain = ""
+    }
+    GPO = [PSCustomObject]@{
+        DefaultDescription = "Automated test GPO"
+        RequireDescription = $true
+    }
+    Operations = [PSCustomObject]@{
+        CheckGPO = $true
+        ListGPOs = $true
+        CreateGPO = $true
+        CheckLinks = $true
+        ListLinks = $true
+    }
+    Simulation = [PSCustomObject]@{
+        ExistingGPOs = @(
+            [PSCustomObject]@{
+                Name = "GPO-Desktop-Security"
+                DisplayName = "GPO-Desktop-Security"
+                Description = "Desktop security policy"
+                Links = @("OU=Computers,DC=example,DC=local")
+            },
+            [PSCustomObject]@{
+                Name = "GPO-Office-Standard"
+                DisplayName = "GPO-Office-Standard"
+                Description = "Office standard policy"
+                Links = @("OU=Users,DC=example,DC=local")
+            },
+            [PSCustomObject]@{
+                Name = "GPO-Windows-Update"
+                DisplayName = "GPO-Windows-Update"
+                Description = "Windows update policy"
+                Links = @()
+            }
+        )
+    }
+}
+
+$ExistingGPOsProperty = $Configuration.Simulation.PSObject.Properties["ExistingGPOs"]
+if ($null -eq $ExistingGPOsProperty -or $null -eq $ExistingGPOsProperty.Value) {
+    throw "Simulation.ExistingGPOs deve existir e não pode ser nulo."
+}
 
 # Contadores
 $TotalTests = 0
@@ -26,6 +71,10 @@ function Test-Result {
 
         & $Test
 
+        if ($script:GPOIsolationStubsVerified -eq $true) {
+            Assert-GPOExternalCallCountsZero -Scenario $Name
+        }
+
         Write-Host "[PASS] $Name" -ForegroundColor Green
         $script:PassedTests++
     }
@@ -35,6 +84,30 @@ function Test-Result {
         Write-Host "       $($_.Exception.Message)" -ForegroundColor Red
 
         $script:FailedTests++
+    }
+}
+
+function Copy-GPOTestConfiguration {
+    $Configuration | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+}
+
+function Get-GPOExternalCallCounts {
+    & $GpoModule {
+        return $script:GPOExternalCallCounts
+    }
+}
+
+function Assert-GPOExternalCallCountsZero {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Scenario
+    )
+
+    $Counts = Get-GPOExternalCallCounts
+    foreach ($Name in $Counts.Keys) {
+        if ($Counts[$Name] -ne 0) {
+            throw "A fronteira externa '$Name' foi chamada durante '$Scenario' ($($Counts[$Name]) chamada(s))."
+        }
     }
 }
 
@@ -56,21 +129,95 @@ Test-Result "Arquivo GPO-Functions.psm1 encontrado" {
 }
 
 # ============================================================
-# TESTE 2 - Arquivo de configuração
+# TESTE 2 - Configuração isolada em memória
 # ============================================================
 
-Test-Result "Arquivo GPO-Configuration.json encontrado" {
+Test-Result "Configuração de teste em memória" {
 
-    if (-not (Test-Path $ConfigPath)) {
-        throw "Arquivo GPO-Configuration.json não encontrado."
+    if ($Configuration.SimulationMode -isnot [bool] -or $Configuration.SimulationMode -ne $true) {
+        throw "A configuração de teste deve habilitar SimulationMode com Boolean true."
     }
 }
 
-# Importar módulo
-Import-Module $ModulePath -Force
+try {
+    if (Get-Module | Where-Object { $_.Path -eq $ModulePath }) {
+        throw "O módulo GPO já está carregado nesta sessão; execute a suíte em um processo isolado."
+    }
 
-# Carregar configuração
-$Configuration = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    $GpoModule = Import-Module $ModulePath -PassThru
+    if ($null -eq $GpoModule) {
+        throw "Não foi possível carregar o módulo GPO para a suíte isolada."
+    }
+
+    & $GpoModule {
+        $script:GPOExternalCallCounts = [ordered]@{
+            GetModule = 0
+            ImportModule = 0
+            GetGPO = 0
+            GetGPOReport = 0
+            NewGPO = 0
+        }
+
+        Set-Item -Path Function:\script:Get-Module -Value {
+            $script:GPOExternalCallCounts.GetModule++
+            throw "FAIL-CLOSED: Get-Module não pode ser chamado pela suíte GPO."
+        }
+        Set-Item -Path Function:\script:Import-Module -Value {
+            $script:GPOExternalCallCounts.ImportModule++
+            throw "FAIL-CLOSED: Import-Module externo não pode ser chamado pela suíte GPO."
+        }
+
+        Set-Item -Path Function:\script:Get-GPO -Value {
+            $script:GPOExternalCallCounts.GetGPO++
+            throw "FAIL-CLOSED: Get-GPO não pode ser chamado pela suíte de simulação."
+        }
+        Set-Item -Path Function:\script:Get-GPOReport -Value {
+            $script:GPOExternalCallCounts.GetGPOReport++
+            throw "FAIL-CLOSED: Get-GPOReport não pode ser chamado pela suíte de simulação."
+        }
+        Set-Item -Path Function:\script:New-GPO -Value {
+            $script:GPOExternalCallCounts.NewGPO++
+            throw "FAIL-CLOSED: New-GPO não pode ser chamado pela suíte de simulação."
+        }
+    }
+
+    & $GpoModule {
+        $ModuleName = $ExecutionContext.SessionState.Module.Name
+        if ([string]::IsNullOrWhiteSpace($ModuleName)) {
+            throw "Não foi possível identificar o módulo GPO durante a validação dos stubs fail-closed."
+        }
+
+        foreach ($CommandName in @("Get-Module", "Import-Module", "Get-GPO", "Get-GPOReport", "New-GPO")) {
+            $StubPath = "Function:\$CommandName"
+            $ScopedStub = Get-Item -LiteralPath $StubPath -ErrorAction Stop
+            $ScopedDefinition = [string]$ScopedStub.Definition
+            if ([string]::IsNullOrWhiteSpace($ScopedDefinition) -or
+                $ScopedDefinition -notmatch "FAIL-CLOSED:") {
+                throw "O stub '$CommandName' não está instalado no escopo corrente do módulo ou não contém FAIL-CLOSED."
+            }
+
+            $ResolvedCommand = Get-Command -Name $CommandName -CommandType Function -ErrorAction Stop
+            $ResolvedDefinition = [string]$ResolvedCommand.Definition
+            if ($ResolvedCommand.CommandType -ne [System.Management.Automation.CommandTypes]::Function -or
+                $ResolvedCommand.ModuleName -ne $ModuleName -or
+                [string]::IsNullOrWhiteSpace($ResolvedDefinition) -or
+                $ResolvedDefinition -ne $ScopedDefinition -or
+                $ResolvedDefinition -notmatch "FAIL-CLOSED:") {
+                throw "A resolução efetiva de '$CommandName' não corresponde ao stub fail-closed instalado no módulo '$ModuleName'."
+            }
+        }
+
+        if ($null -eq $script:GPOExternalCallCounts) {
+            throw "Os contadores dos stubs fail-closed não foram inicializados corretamente."
+        }
+        foreach ($CounterName in @("GetModule", "ImportModule", "GetGPO", "GetGPOReport", "NewGPO")) {
+            if (-not $script:GPOExternalCallCounts.Contains($CounterName)) {
+                throw "O contador do stub '$CounterName' não foi inicializado."
+            }
+        }
+    }
+
+    $script:GPOIsolationStubsVerified = $true
 
 # ============================================================
 # TESTE 3 - Configuração válida
@@ -101,18 +248,10 @@ Test-Result "SimulationMode habilitado" {
 # TESTE 5 - Conectividade simulada
 # ============================================================
 
-Test-Result "Conectividade em modo de simulação" {
+Test-Result "Simulação não utiliza comandos externos de Group Policy" {
 
-    $Result = Test-GPOConnectivity `
-        -Configuration $Configuration
-
-    if ($Result.Simulation -ne $true) {
-        throw "O resultado deveria indicar Simulation = True."
-    }
-
-    if ($Result.Connected -ne $false) {
-        throw "Connected deveria ser False no modo de simulação."
-    }
+    $null = Get-GPOList -Configuration $Configuration
+    Assert-GPOExternalCallCountsZero -Scenario "Simulation"
 }
 
 # ============================================================
@@ -379,7 +518,7 @@ Test-Result "Bloquear consulta de vínculos de GPO inexistente" {
 
 Test-Result "Bloquear operação desabilitada na configuração" {
 
-    $TestConfiguration = $Configuration.PSObject.Copy()
+    $TestConfiguration = Copy-GPOTestConfiguration
 
     $TestConfiguration.Operations.CreateGPO = $false
 
@@ -415,7 +554,7 @@ Test-Result "Bloquear operação desabilitada na configuração" {
 
 Test-Result "Permitir operação habilitada na configuração" {
 
-    $TestConfiguration = $Configuration.PSObject.Copy()
+    $TestConfiguration = Copy-GPOTestConfiguration
 
     $TestConfiguration.Operations.CreateGPO = $true
 
@@ -432,6 +571,100 @@ Test-Result "Permitir operação habilitada na configuração" {
     if ($Result.Simulation -ne $true) {
         throw "A operação deveria ocorrer em modo de simulação."
     }
+}
+
+# ============================================================
+# TESTE 22 - Mutator direto respeita a flag
+# ============================================================
+
+Test-Result "Bloquear mutator direto com operação desabilitada" {
+
+    $TestConfiguration = Copy-GPOTestConfiguration
+    $TestConfiguration.Operations.CreateGPO = $false
+    $ErrorCaptured = $false
+
+    try {
+        New-GPOProvision `
+            -GPOName "GPO-Teste-Direto-Bloqueado" `
+            -Description "Teste de autorização direta" `
+            -Configuration $TestConfiguration |
+            Out-Null
+    }
+    catch {
+        $ErrorCaptured = $_.Exception.Message -match "está desabilitada"
+    }
+
+    if (-not $ErrorCaptured) {
+        throw "O mutator direto deveria bloquear a operação desabilitada."
+    }
+}
+
+# ============================================================
+# TESTE 23 - Operação real bloqueada por padrão
+# ============================================================
+
+Test-Result "Bloquear operação real sem autorização explícita" {
+
+    Assert-GPOExternalCallCountsZero -Scenario "pré-condição de ausência de autorização"
+    $TestConfiguration = Copy-GPOTestConfiguration
+    $TestConfiguration.SimulationMode = $false
+    $TestConfiguration.ActiveDirectory.DomainController = "dc.invalid"
+    $TestConfiguration.ActiveDirectory.TargetDomain = "example.invalid"
+    $ErrorCaptured = $false
+
+    try {
+        New-GPOProvision `
+            -GPOName "GPO-Teste-Real-Bloqueado" `
+            -Description "Operação real deve ser bloqueada" `
+            -Configuration $TestConfiguration |
+            Out-Null
+    }
+    catch {
+        $ErrorCaptured = $_.Exception.Message -match "autorização explícita"
+    }
+
+    if (-not $ErrorCaptured) {
+        throw "A operação real sem -AllowRealOperation deveria ser bloqueada antes de qualquer chamada externa."
+    }
+
+    Assert-GPOExternalCallCountsZero -Scenario "ausência de autorização real"
+}
+
+# ============================================================
+# TESTE 24 - WhatIf não altera a simulação
+# ============================================================
+
+Test-Result "WhatIf não altera os fixtures em memória" {
+
+    Assert-GPOExternalCallCountsZero -Scenario "pré-condição WhatIf"
+    $TestConfiguration = Copy-GPOTestConfiguration
+    $BeforeCount = @($TestConfiguration.Simulation.ExistingGPOs).Count
+    $Result = New-GPOProvision `
+        -GPOName "GPO-Teste-WhatIf" `
+        -Description "Preview sem alteração de estado" `
+        -Configuration $TestConfiguration `
+        -WhatIf
+
+    if ($Result.Success -ne $false) {
+        throw "WhatIf deveria informar que a criação não foi aprovada."
+    }
+
+    if (@($TestConfiguration.Simulation.ExistingGPOs).Count -ne $BeforeCount) {
+        throw "WhatIf alterou os fixtures em memória."
+    }
+
+    Assert-GPOExternalCallCountsZero -Scenario "WhatIf"
+}
+
+# ============================================================
+# TESTE 25 - Stubs fail-closed nunca acionados
+# ============================================================
+
+Test-Result "Nenhum cmdlet externo de Group Policy foi chamado" {
+
+    $Counts = Get-GPOExternalCallCounts
+    Assert-GPOExternalCallCountsZero -Scenario "regressão GPO completa"
+    Write-Host ("Contadores externos GPO: " + (($Counts.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ", "))
 }
 
 # ============================================================
@@ -458,6 +691,13 @@ else {
 
     Write-Host "STATUS: EXISTEM TESTES COM FALHA" -ForegroundColor Red
 }
+}
+finally {
+    if ($null -ne $GpoModule) {
+        Remove-Module -ModuleInfo $GpoModule -Force -ErrorAction Stop
+    }
+}
+
 # V1 EXIT CODE HANDLING
 if ($FailedTests -gt 0) {
     exit 1

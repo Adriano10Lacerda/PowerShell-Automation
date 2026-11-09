@@ -11,6 +11,7 @@ The module uses a JSON configuration file and provides an interactive PowerShell
 - Process files from configured reporting sources.
 - Generate a reporting summary.
 - Include summary, details, and timestamps according to configuration.
+- Export summary and detail rows as separate CSV files when both are enabled.
 - Configure JSON and CSV output formats.
 - Enable or disable individual reporting sources.
 - Configure source directories and file patterns.
@@ -52,10 +53,10 @@ Keep simulation mode enabled while testing. Review `Reporting-Functions.psm1` to
 
 | Setting | Description |
 |---|---|
-| `SimulationMode` | Configures simulation mode. |
-| `Reporting.IncludeSummary` | Controls whether the report includes a summary. |
-| `Reporting.IncludeDetails` | Controls whether report details are included. |
-| `Reporting.IncludeTimestamp` | Controls whether a timestamp is included. |
+| `SimulationMode` | Must be Boolean. `true` reads enabled sources and previews outputs without writing; `false` writes reports to `Output.Directory`. |
+| `Reporting.IncludeSummary` | Boolean. Includes/removes the summary in JSON and controls the summary CSV. |
+| `Reporting.IncludeDetails` | Boolean. Includes/removes source details in JSON and controls the details CSV. |
+| `Reporting.IncludeTimestamp` | Boolean. Includes/removes report timestamps from exported content. Filenames remain timestamped. |
 | `Output.Directory` | Destination directory for generated reports. |
 | `Output.Formats` | Configured output formats, such as JSON and CSV. |
 | `Sources.ComputerInventory.Enabled` | Enables or disables the computer inventory source. |
@@ -91,13 +92,20 @@ When reporting executes, the script displays processing totals, successful and f
 
 ## Tests
 
-Run the automated test script from the repository root:
+Run the isolated automated test script from the repository root:
 
 ```powershell
 .\08-Reporting\Test-Reporting.ps1
 ```
 
 Review the test results before using the module. Tests performed with simulated data do not, by themselves, prove that real source files can be processed successfully in every target environment.
+
+The test script creates its own dummy CSV/JSON input files and temporary output
+directories. It does not read the local `Reporting-Configuration.json` or
+existing report files. The temporary test workspace is removed in `finally`.
+
+The latest isolated run completed 27/27 checks with exit code 0 on PowerShell
+7.6.9. This does not constitute a test against live source data.
 
 ## Security and Operational Notes
 
@@ -106,4 +114,8 @@ Review the test results before using the module. Tests performed with simulated 
 - Verify source directories and file patterns before execution.
 - Confirm that the output directory is appropriate and writable.
 - Review simulation mode and enabled sources before processing.
+- Simulation mode suppresses output writes; enabled source files are still read.
 - Validate generated reports before relying on them for operational decisions.
+
+An exported result is unsuccessful if any source file could not be parsed, even
+when a partial report was successfully generated.

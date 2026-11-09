@@ -6,7 +6,50 @@ $ErrorActionPreference = "Stop"
 
 $ScriptPath = $PSScriptRoot
 $ModulePath = Join-Path $ScriptPath "Reporting-Functions.psm1"
-$ConfigPath = Join-Path $ScriptPath "Reporting-Configuration.json"
+$ExampleConfigPath = Join-Path $ScriptPath "Reporting-Configuration.example.json"
+
+function Assert-ReportingProjectFile {
+    param ([Parameter(Mandatory = $true)][string]$Path)
+
+    $Root = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([char[]]@('\', '/'))
+    $FullPath = [System.IO.Path]::GetFullPath($Path)
+    if (-not [System.IO.Path]::IsPathFullyQualified($Path) -or
+        $Path.StartsWith('\\') -or $Path.StartsWith('//') -or
+        $Path.StartsWith('\\?\') -or $Path.StartsWith('\\.\') -or
+        $FullPath.StartsWith('\\') -or
+        [System.IO.Path]::GetPathRoot($FullPath).StartsWith('\\')) {
+        throw "Caminho local absoluto exigido para arquivo de entrada: '$Path'."
+    }
+    $VolumeRoot = [System.IO.Path]::GetPathRoot($FullPath)
+    if ($FullPath.Substring($VolumeRoot.Length).Contains(':')) {
+        throw "ADS ou fluxo alternativo recusado para arquivo de entrada: '$FullPath'."
+    }
+    $RootPrefix = $Root + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $FullPath.StartsWith($RootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Arquivo de entrada fora da pasta Reporting: '$FullPath'."
+    }
+
+    $CurrentPath = $VolumeRoot
+    foreach ($Segment in @($FullPath.Substring($VolumeRoot.Length) -split '[\\/]+' | Where-Object { $_ })) {
+        $CurrentPath = Join-Path -Path $CurrentPath -ChildPath $Segment
+        try {
+            $Attributes = [System.IO.File]::GetAttributes($CurrentPath)
+        }
+        catch [System.IO.FileNotFoundException] { break }
+        catch [System.IO.DirectoryNotFoundException] { break }
+        if (($Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Arquivo de entrada atravessa reparse point: '$CurrentPath'."
+        }
+    }
+
+    if (-not [System.IO.File]::Exists($FullPath)) {
+        throw "Arquivo de entrada ausente: '$FullPath'."
+    }
+    return $FullPath
+}
+
+$ModulePath = Assert-ReportingProjectFile -Path $ModulePath
+$ExampleConfigPath = Assert-ReportingProjectFile -Path $ExampleConfigPath
 
 
 # ============================================================
@@ -76,14 +119,14 @@ Test-Result "Arquivo Reporting-Functions.psm1 encontrado" {
 
 
 # ============================================================
-# TESTE 2 - ARQUIVO DE CONFIGURAÇÃO
+# TESTE 2 - ARQUIVO DE CONFIGURAÇÃO DE EXEMPLO
 # ============================================================
 
-Test-Result "Arquivo Reporting-Configuration.json encontrado" {
+Test-Result "Arquivo Reporting-Configuration.example.json encontrado" {
 
-    if (-not (Test-Path $ConfigPath)) {
+    if (-not (Test-Path $ExampleConfigPath)) {
 
-        throw "Arquivo Reporting-Configuration.json não encontrado."
+        throw "Arquivo Reporting-Configuration.example.json não encontrado."
     }
 }
 
@@ -94,16 +137,385 @@ Test-Result "Arquivo Reporting-Configuration.json encontrado" {
 
 Import-Module $ModulePath -Force
 
+$ReportingModulePath = [System.IO.Path]::GetFullPath($ModulePath)
+$ReportingModuleMatches = @(Get-Module | Where-Object {
+    $_.Path -and [System.IO.Path]::GetFullPath($_.Path) -eq $ReportingModulePath
+})
+if ($ReportingModuleMatches.Count -ne 1) {
+    throw "A instância de Reporting-Functions não foi identificada univocamente."
+}
+$ReportingModuleInfo = $ReportingModuleMatches[0]
+
+function Assert-ReportingTestPath {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$AllowedRoot,
+
+        [switch]$AllowRoot,
+
+        [switch]$AllowMissing
+    )
+
+    $CanonicalRoot = [System.IO.Path]::GetFullPath($AllowedRoot)
+    $LexicalResult = & $script:ReportingModuleInfo {
+        param ($CandidatePath, $CandidateRoot)
+        Resolve-ReportingOutputPathLexically `
+            -Path $CandidatePath `
+            -AllowedRoot $CandidateRoot
+    } $Path $CanonicalRoot
+
+    $CanonicalPath = [System.IO.Path]::GetFullPath($LexicalResult.OutputPath)
+    $RootPrefix = $CanonicalRoot.TrimEnd([char[]]@(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )) + [System.IO.Path]::DirectorySeparatorChar
+    $IsRoot = $CanonicalPath.Equals(
+        $CanonicalRoot,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+
+    if ((-not $IsRoot -and -not $CanonicalPath.StartsWith(
+                $RootPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )) -or ($IsRoot -and -not $AllowRoot)) {
+        throw "Caminho de teste fora da raiz exclusiva permitida: '$CanonicalPath'."
+    }
+
+    $VolumeRoot = [System.IO.Path]::GetPathRoot($CanonicalPath)
+    $CurrentPath = $VolumeRoot
+    $RemainingPath = $CanonicalPath.Substring($VolumeRoot.Length)
+    foreach ($Segment in @($RemainingPath -split '[\\/]')) {
+        if ([string]::IsNullOrWhiteSpace($Segment)) { continue }
+        $CurrentPath = Join-Path -Path $CurrentPath -ChildPath $Segment
+        try {
+            $CurrentItem = Get-Item -LiteralPath $CurrentPath -Force -ErrorAction Stop
+        }
+        catch [System.Management.Automation.ItemNotFoundException] {
+            if ($AllowMissing) { break }
+            throw
+        }
+        catch [System.IO.FileNotFoundException] {
+            if ($AllowMissing) { break }
+            throw
+        }
+        catch [System.IO.DirectoryNotFoundException] {
+            if ($AllowMissing) { break }
+            throw
+        }
+
+        if (($CurrentItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Caminho de teste atravessa reparse point: '$CurrentPath'."
+        }
+    }
+
+    if (-not $AllowMissing -and -not (Test-Path -LiteralPath $CanonicalPath)) {
+        throw "Caminho de teste esperado não existe: '$CanonicalPath'."
+    }
+
+    return $CanonicalPath
+}
+
+# These checks reduce path risk for the test fixtures, but filesystem APIs do
+# not make check-then-use atomic. This harness is not an OS-level sandbox.
+function New-ReportingTestDirectory {
+    param ([Parameter(Mandatory = $true)][string]$Path)
+
+    $CanonicalPath = Assert-ReportingTestPath `
+        -Path $Path `
+        -AllowedRoot $script:TestWorkspace `
+        -AllowMissing
+    if (Test-Path -LiteralPath $CanonicalPath) {
+        throw "Diretório de fixture já existe; não será reutilizado: '$CanonicalPath'."
+    }
+
+    New-Item -ItemType Directory -Path $CanonicalPath -ErrorAction Stop |
+        Out-Null
+    $null = Assert-ReportingTestPath `
+        -Path $CanonicalPath `
+        -AllowedRoot $script:TestWorkspace
+}
+
+function Set-ReportingTestFixture {
+    param (
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value,
+        [string]$Encoding = 'UTF8'
+    )
+
+    $CanonicalPath = Assert-ReportingTestPath `
+        -Path $Path `
+        -AllowedRoot $script:TestWorkspace `
+        -AllowMissing
+    $TextEncoding = switch ($Encoding.ToUpperInvariant()) {
+        'UTF8' { [System.Text.UTF8Encoding]::new($false); break }
+        'UTF8BOM' { [System.Text.UTF8Encoding]::new($true); break }
+        'UNICODE' { [System.Text.Encoding]::Unicode; break }
+        'ASCII' { [System.Text.Encoding]::ASCII; break }
+        'DEFAULT' { [System.Text.Encoding]::Default; break }
+        default { throw "Encoding de fixture não suportado: '$Encoding'." }
+    }
+    $Bytes = $TextEncoding.GetBytes($Value)
+    $Stream = [System.IO.File]::Open(
+        $CanonicalPath,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None
+    )
+    try {
+        $Stream.Write($Bytes, 0, $Bytes.Length)
+    }
+    finally {
+        $Stream.Dispose()
+    }
+    $null = Assert-ReportingTestPath `
+        -Path $CanonicalPath `
+        -AllowedRoot $script:TestWorkspace
+}
+function Remove-ReportingTestEntry {
+    param (
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$AllowRoot
+    )
+
+    $CanonicalPath = Assert-ReportingTestPath `
+        -Path $Path `
+        -AllowedRoot $script:TestWorkspace `
+        -AllowRoot:$AllowRoot `
+        -AllowMissing
+    if (-not (Test-Path -LiteralPath $CanonicalPath)) { return }
+
+    $Item = Get-Item -LiteralPath $CanonicalPath -Force -ErrorAction Stop
+    if (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Limpeza recusada para reparse point: '$CanonicalPath'."
+    }
+
+    if ($Item.PSIsContainer) {
+        foreach ($ChildPath in [System.IO.Directory]::GetFileSystemEntries($CanonicalPath)) {
+            Remove-ReportingTestEntry -Path $ChildPath
+        }
+        [System.IO.Directory]::Delete($CanonicalPath, $false)
+        return
+    }
+
+    [System.IO.File]::Delete($CanonicalPath)
+}
+
+function Assert-ReportingTestConfigurationPaths {
+    param (
+        [Parameter(Mandatory = $true)][PSCustomObject]$Configuration,
+        [switch]$AllowMissingSource
+    )
+
+    $null = Assert-ReportingTestPath `
+        -Path ([string]$Configuration.Output.Directory) `
+        -AllowedRoot $script:TestWorkspace `
+        -AllowMissing
+
+    foreach ($SourceProperty in $Configuration.Sources.PSObject.Properties) {
+        $Source = $SourceProperty.Value
+        if ($Source.Enabled -eq $true) {
+            $null = Assert-ReportingTestPath `
+                -Path ([string]$Source.Directory) `
+                -AllowedRoot $script:TestWorkspace `
+                -AllowMissing:$AllowMissingSource
+            if ([string]$Source.FilePattern -match '[\\/]' -or
+                [string]$Source.FilePattern -match '(^|\.)\.($|\.)') {
+                throw "FilePattern de fixture contém caminho ou traversal: '$($Source.FilePattern)'."
+            }
+        }
+    }
+}
+
+function New-ReportingTestDataset {
+    param ([Parameter(Mandatory = $true)][PSCustomObject]$Configuration)
+
+    Assert-ReportingTestConfigurationPaths -Configuration $Configuration
+    New-ReportingDataset -Configuration $Configuration
+}
+
+Test-Result "Rejeitar formas ambíguas de caminho somente por validação lexical" {
+    $ReportingModuleMatches = @(Get-Module | Where-Object { $_.Path -eq $ModulePath })
+    if ($ReportingModuleMatches.Count -ne 1) {
+        throw "A instância do módulo de Reporting não foi identificada univocamente."
+    }
+
+    $InvalidPaths = @(
+        [PSCustomObject]@{ Path = "Reports:stream"; RequireAbsolute = $false },
+        [PSCustomObject]@{ Path = "C:\Reports\file:stream"; RequireAbsolute = $true },
+        [PSCustomObject]@{ Path = "C:Reports"; RequireAbsolute = $false },
+        [PSCustomObject]@{ Path = "\Reports"; RequireAbsolute = $false },
+        [PSCustomObject]@{ Path = "\\?\C:\Reports"; RequireAbsolute = $true },
+        [PSCustomObject]@{ Path = "\\.\PhysicalDrive0"; RequireAbsolute = $true },
+        [PSCustomObject]@{ Path = "C:\Reports\.\Output"; RequireAbsolute = $true },
+        [PSCustomObject]@{ Path = "C:\Reports\..\Outside"; RequireAbsolute = $true },
+        [PSCustomObject]@{ Path = "C:\Reports\Name."; RequireAbsolute = $true },
+        [PSCustomObject]@{ Path = "C:\Reports\Name "; RequireAbsolute = $true },
+        [PSCustomObject]@{ Path = "C:\Reports\NUL.txt"; RequireAbsolute = $true },
+        [PSCustomObject]@{ Path = "C:\Reports\COM1.csv"; RequireAbsolute = $true }
+    )
+
+    foreach ($InvalidPath in $InvalidPaths) {
+        $Rejected = $false
+        try {
+            & $ReportingModuleMatches[0] {
+                param ($CandidatePath, $MustBeAbsolute)
+                Assert-ReportingPathLexicallySafe `
+                    -Path $CandidatePath `
+                    -RequireAbsolute:$MustBeAbsolute
+            } $InvalidPath.Path $InvalidPath.RequireAbsolute
+        }
+        catch {
+            $Rejected = $true
+        }
+
+        if (-not $Rejected) {
+            throw "O caminho lexicalmente inválido foi aceito: '$($InvalidPath.Path)'."
+        }
+    }
+
+    $ValidPathResult = & $ReportingModuleMatches[0] {
+        param ($CandidatePath)
+        Assert-ReportingPathLexicallySafe -Path $CandidatePath
+        return $true
+    } "Reports"
+
+    if ($ValidPathResult -ne $true) {
+        throw "O caminho relativo simples foi rejeitado."
+    }
+
+    $DotPathResolution = & $ReportingModuleMatches[0] {
+        param ($CandidatePath, $CandidateRoot)
+        Resolve-ReportingOutputPathLexically `
+            -Path $CandidatePath `
+            -AllowedRoot $CandidateRoot
+    } './Reports' 'C:\AuthorizedRoot'
+
+    if ($DotPathResolution.OutputPath -ne 'C:\AuthorizedRoot\Reports') {
+        throw "O prefixo relativo './' não foi normalizado sob a raiz autorizada."
+    }
+
+    $CaseInsensitivePathMatch = & $ReportingModuleMatches[0] {
+        Assert-ReportingOutputPathMatches `
+            -ExpectedPath 'C:\AuthorizedRoot\Reports' `
+            -ResolvedPath 'c:\authorizedroot\reports'
+        return $true
+    }
+    if ($CaseInsensitivePathMatch -ne $true) {
+        throw "A comparação de caminhos canônicos não respeitou a semântica Windows."
+    }
+
+    $ChangedPathRejected = $false
+    try {
+        & $ReportingModuleMatches[0] {
+            Assert-ReportingOutputPathMatches `
+                -ExpectedPath 'C:\AuthorizedRoot\Reports' `
+                -ResolvedPath 'C:\AuthorizedRoot\Other'
+        }
+    }
+    catch {
+        $ChangedPathRejected = $true
+    }
+    if (-not $ChangedPathRejected) {
+        throw "Um caminho de saída alterado passou pela comparação."
+    }
+}
+
 
 # ============================================================
-# CARREGAR CONFIGURAÇÃO
+# FIXTURES ISOLADAS EM MEMÓRIA E TEMP
 # ============================================================
 
-$Configuration = Get-Content `
-    $ConfigPath `
-    -Raw |
-    ConvertFrom-Json
+$TestTempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+$TestWorkspace = Join-Path $TestTempRoot (
+    "Reporting-Test-" + [guid]::NewGuid().ToString("N")
+)
+$TestWorkspaceCreated = $false
+$null = Assert-ReportingTestPath `
+    -Path $TestTempRoot `
+    -AllowedRoot $TestTempRoot `
+    -AllowRoot
+$TestWorkspace = Assert-ReportingTestPath `
+    -Path $TestWorkspace `
+    -AllowedRoot $TestTempRoot `
+    -AllowMissing
+if (Test-Path -LiteralPath $TestWorkspace) {
+    throw "A raiz temporária exclusiva já existe; execução bloqueada: '$TestWorkspace'."
+}
+$TestInputDirectory = Join-Path $TestWorkspace "Input"
 
+try {
+    # New-Item sem -Force falha se outra execução já tiver criado o GUID.
+    New-Item -ItemType Directory -Path $TestWorkspace -ErrorAction Stop | Out-Null
+    $TestWorkspaceCreated = $true
+    $null = Assert-ReportingTestPath `
+        -Path $TestWorkspace `
+        -AllowedRoot $TestTempRoot
+
+    New-ReportingTestDirectory -Path $TestInputDirectory
+
+    Set-ReportingTestFixture `
+        -Path (Join-Path $TestInputDirectory "ComputerInventory_fixture.csv") `
+        -Value "ComputerName,Manufacturer`nREPORTING-TEST-PC,Example"
+
+    Set-ReportingTestFixture `
+        -Path (Join-Path $TestInputDirectory "ComputerInventory_fixture.json") `
+        -Value '{"ComputerName":"REPORTING-TEST-PC","Manufacturer":"Example"}'
+
+    $Configuration = [PSCustomObject]@{
+        SimulationMode = $true
+        Reporting = [PSCustomObject]@{
+            IncludeSummary = $true
+            IncludeDetails = $true
+            IncludeTimestamp = $true
+        }
+        Output = [PSCustomObject]@{
+            Directory = Join-Path $TestWorkspace "Output"
+            Formats = @("JSON", "CSV")
+        }
+        Sources = [PSCustomObject]@{
+            ComputerInventory = [PSCustomObject]@{
+                Enabled = $true
+                Directory = $TestInputDirectory
+                FilePattern = "ComputerInventory_*"
+                Formats = @("JSON", "CSV")
+            }
+            ADUsers = [PSCustomObject]@{
+                Enabled = $false
+                Directory = ""
+                FilePattern = "*.csv"
+                Formats = @("CSV")
+            }
+            ADGroups = [PSCustomObject]@{
+                Enabled = $false
+                Directory = ""
+                FilePattern = "*.csv"
+                Formats = @("CSV")
+            }
+            GPOs = [PSCustomObject]@{
+                Enabled = $false
+                Directory = ""
+                FilePattern = "*.csv"
+                Formats = @("CSV")
+            }
+            EntraUsers = [PSCustomObject]@{
+                Enabled = $false
+                Directory = ""
+                FilePattern = "*.csv"
+                Formats = @("CSV")
+            }
+        }
+    }
+
+    function Copy-ReportingTestConfiguration {
+        $Configuration | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    }
+
+# ============================================================
+# TESTES FUNCIONAIS
+# ============================================================
 
 # ============================================================
 # TESTE 3 - CONFIGURAÇÃO VÁLIDA
@@ -340,7 +752,7 @@ Test-Result "Gerar resumo dos dados" {
 
 Test-Result "Gerar Dataset consolidado" {
 
-    $Dataset = New-ReportingDataset `
+    $Dataset = New-ReportingTestDataset `
         -Configuration $Configuration
 
     if ($null -eq $Dataset) {
@@ -366,11 +778,12 @@ Test-Result "Gerar Dataset consolidado" {
 
 Test-Result "Exportar Dataset em simulação sem gravar arquivos" {
 
-    $Dataset = New-ReportingDataset -Configuration $Configuration
+    $Dataset = New-ReportingTestDataset -Configuration $Configuration
 
     $Export = Export-ReportingDataset `
         -Dataset $Dataset `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowedRoot $TestWorkspace
 
     if ($Export.Success -ne $true) {
         throw "A exportação simulada não retornou sucesso."
@@ -380,8 +793,8 @@ Test-Result "Exportar Dataset em simulação sem gravar arquivos" {
         throw "O resultado deveria indicar modo de simulação."
     }
 
-    if (@($Export.Files).Count -lt 2) {
-        throw "Deveriam ser previstos pelo menos dois arquivos."
+    if (@($Export.Files).Count -ne 3) {
+        throw "Deveriam ser previstos um JSON e dois CSVs (resumo e detalhes)."
     }
 
     foreach ($File in $Export.Files) {
@@ -398,7 +811,8 @@ Test-Result "Exportar Dataset em simulação sem gravar arquivos" {
 
 Test-Result "Executar Invoke-Reporting em simulação" {
 
-    $Result = Invoke-Reporting -Configuration $Configuration
+    Assert-ReportingTestConfigurationPaths -Configuration $Configuration
+    $Result = Invoke-Reporting -Configuration $Configuration -AllowedRoot $TestWorkspace
 
     if ($Result.Success -ne $true) {
         throw "Invoke-Reporting não retornou sucesso."
@@ -412,8 +826,8 @@ Test-Result "Executar Invoke-Reporting em simulação" {
         throw "Invoke-Reporting identificou falhas."
     }
 
-    if (@($Result.Files).Count -lt 2) {
-        throw "A simulação deveria informar os caminhos previstos."
+    if (@($Result.Files).Count -ne 3) {
+        throw "A simulação deveria informar um JSON e dois CSVs."
     }
 
     foreach ($File in $Result.Files) {
@@ -435,20 +849,23 @@ Test-Result "Bloquear formato inválido sem criar pasta" {
         ConvertFrom-Json
 
     $TestOutputDirectory = Join-Path `
-        -Path $env:TEMP `
+        -Path $TestWorkspace `
         -ChildPath ("Reporting-InvalidFormat-" + [guid]::NewGuid().ToString("N"))
 
     $TestConfiguration.Output.Directory = $TestOutputDirectory
     $TestConfiguration.Output.Formats = @("INVALID")
     $TestConfiguration.SimulationMode = $false
 
-    $Dataset = New-ReportingDataset -Configuration $TestConfiguration
+    $Dataset = New-ReportingTestDataset -Configuration $TestConfiguration
     $ErrorCaptured = $false
 
     try {
         Export-ReportingDataset `
             -Dataset $Dataset `
-            -Configuration $TestConfiguration |
+            -Configuration $TestConfiguration `
+            -AllowRealOperation `
+            -AllowedRoot $TestWorkspace `
+            -Confirm:$false |
             Out-Null
     }
     catch {
@@ -471,7 +888,7 @@ Test-Result "Bloquear formato inválido sem criar pasta" {
 
 Test-Result "Bloquear configuração sem Sources" {
 
-    $TestConfiguration = $Configuration.PSObject.Copy()
+    $TestConfiguration = Copy-ReportingTestConfiguration
 
     $TestConfiguration.Sources = $null
 
@@ -501,7 +918,7 @@ Test-Result "Bloquear configuração sem Sources" {
 
 Test-Result "Bloquear fonte sem diretório" {
 
-    $TestConfiguration = $Configuration.PSObject.Copy()
+    $TestConfiguration = Copy-ReportingTestConfiguration
 
     $TestConfiguration.Sources.ComputerInventory.Directory = ""
 
@@ -531,7 +948,7 @@ Test-Result "Bloquear fonte sem diretório" {
 
 Test-Result "Bloquear fonte sem FilePattern" {
 
-    $TestConfiguration = $Configuration.PSObject.Copy()
+    $TestConfiguration = Copy-ReportingTestConfiguration
 
     $TestConfiguration.Sources.ComputerInventory.FilePattern = ""
 
@@ -561,27 +978,25 @@ Test-Result "Bloquear fonte sem FilePattern" {
 
 Test-Result "Exportação real isolada em diretório temporário" {
 
-    $TestOutputDirectory = Join-Path $env:TEMP (
+    $TestOutputDirectory = Join-Path $TestWorkspace (
         "Reporting-RealExport-" + [guid]::NewGuid().ToString("N")
     )
 
     try {
-        $TestConfiguration = Get-Content -LiteralPath $ConfigPath -Raw |
-            ConvertFrom-Json
-
-        $TestConfiguration = $TestConfiguration |
-            ConvertTo-Json -Depth 20 |
-            ConvertFrom-Json
+        $TestConfiguration = Copy-ReportingTestConfiguration
 
         $TestConfiguration.Output.Directory = $TestOutputDirectory
         $TestConfiguration.Output.Formats = @("JSON", "CSV")
         $TestConfiguration.SimulationMode = $false
 
-        $Dataset = New-ReportingDataset -Configuration $TestConfiguration
+        $Dataset = New-ReportingTestDataset -Configuration $TestConfiguration
 
         $Export = Export-ReportingDataset `
             -Dataset $Dataset `
-            -Configuration $TestConfiguration
+            -Configuration $TestConfiguration `
+            -AllowRealOperation `
+            -AllowedRoot $TestWorkspace `
+            -Confirm:$false
 
         if ($Export.Success -ne $true) {
             throw "A exportação real não retornou sucesso."
@@ -602,8 +1017,8 @@ Test-Result "Exportação real isolada em diretório temporário" {
             throw "Esperado 1 arquivo JSON; encontrados: $($JsonFiles.Count)."
         }
 
-        if ($CsvFiles.Count -ne 1) {
-            throw "Esperado 1 arquivo CSV; encontrados: $($CsvFiles.Count)."
+        if ($CsvFiles.Count -ne 2) {
+            throw "Esperados 2 arquivos CSV; encontrados: $($CsvFiles.Count)."
         }
 
         foreach ($File in @($JsonFiles) + @($CsvFiles)) {
@@ -616,13 +1031,13 @@ Test-Result "Exportação real isolada em diretório temporário" {
             ConvertFrom-Json |
             Out-Null
 
-        if ($Export.Files.Count -ne 2) {
-            throw "O resultado deveria informar os dois arquivos exportados."
+        if ($Export.Files.Count -ne 3) {
+            throw "O resultado deveria informar os três arquivos exportados."
         }
     }
     finally {
         if (Test-Path -LiteralPath $TestOutputDirectory -PathType Container) {
-            Remove-Item -LiteralPath $TestOutputDirectory -Recurse -Force
+            Remove-ReportingTestEntry -Path $TestOutputDirectory
         }
     }
 }
@@ -633,7 +1048,7 @@ Test-Result "Exportação real isolada em diretório temporário" {
 
 Test-Result "Bloquear exportação quando o destino impede gravação" {
 
-    $TempRoot = Join-Path $env:TEMP (
+    $TempRoot = Join-Path $TestWorkspace (
         "Reporting-WriteFailure-" + [guid]::NewGuid().ToString("N")
     )
 
@@ -641,30 +1056,26 @@ Test-Result "Bloquear exportação quando o destino impede gravação" {
     $TestOutputDirectory = Join-Path $BlockingFile "Reports"
 
     try {
-        New-Item -ItemType Directory -Path $TempRoot -Force -ErrorAction Stop |
-            Out-Null
+        New-ReportingTestDirectory -Path $TempRoot
+        Set-ReportingTestFixture -Path $BlockingFile -Value "arquivo de bloqueio"
 
-        Set-Content -LiteralPath $BlockingFile -Value "arquivo de bloqueio" -ErrorAction Stop
-
-        $TestConfiguration = Get-Content -LiteralPath $ConfigPath -Raw |
-            ConvertFrom-Json
-
-        $TestConfiguration = $TestConfiguration |
-            ConvertTo-Json -Depth 20 |
-            ConvertFrom-Json
+        $TestConfiguration = Copy-ReportingTestConfiguration
 
         $TestConfiguration.Output.Directory = $TestOutputDirectory
         $TestConfiguration.Output.Formats = @("JSON")
         $TestConfiguration.SimulationMode = $false
 
-        $Dataset = New-ReportingDataset -Configuration $TestConfiguration
+        $Dataset = New-ReportingTestDataset -Configuration $TestConfiguration
 
         $ExportFailed = $false
 
         try {
             Export-ReportingDataset `
                 -Dataset $Dataset `
-                -Configuration $TestConfiguration |
+                -Configuration $TestConfiguration `
+                -AllowRealOperation `
+                -AllowedRoot $TestWorkspace `
+                -Confirm:$false |
                 Out-Null
         }
         catch {
@@ -681,7 +1092,7 @@ Test-Result "Bloquear exportação quando o destino impede gravação" {
     }
     finally {
         if (Test-Path -LiteralPath $TempRoot) {
-            Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-ReportingTestEntry -Path $TempRoot
         }
     }
 }
@@ -693,19 +1104,18 @@ Write-Host "=============================================" -ForegroundColor Cyan
 
 # Teste 21 - Bloquear formatos duplicados antes de criar a pasta
 Test-Result "Bloquear formatos duplicados antes de criar a pasta" {
-    $DuplicateConfig = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-$DuplicateConfig = $DuplicateConfig | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-    $DuplicateOutput = Join-Path ([System.IO.Path]::GetTempPath()) ("Reporting-Duplicados-" + [guid]::NewGuid().ToString("N"))
+    $DuplicateConfig = Copy-ReportingTestConfiguration
+    $DuplicateOutput = Join-Path $TestWorkspace ("Reporting-Duplicados-" + [guid]::NewGuid().ToString("N"))
     $DuplicateConfig.Output.Directory = $DuplicateOutput
     $DuplicateConfig.Output.Formats = @("JSON", "json")
     $DuplicateConfig.SimulationMode = $false
 
     try {
-        $DuplicateDataset = New-ReportingDataset -Configuration $DuplicateConfig
+        $DuplicateDataset = New-ReportingTestDataset -Configuration $DuplicateConfig
         $DuplicateError = $null
 
         try {
-            Export-ReportingDataset -Configuration $DuplicateConfig -Dataset $DuplicateDataset | Out-Null
+            Export-ReportingDataset -Configuration $DuplicateConfig -Dataset $DuplicateDataset -AllowRealOperation -AllowedRoot $TestWorkspace -Confirm:$false | Out-Null
         }
         catch {
             $DuplicateError = $_.Exception.Message
@@ -721,23 +1131,22 @@ $DuplicateConfig = $DuplicateConfig | ConvertTo-Json -Depth 20 | ConvertFrom-Jso
     }
     finally {
         if (Test-Path -LiteralPath $DuplicateOutput) {
-            Remove-Item -LiteralPath $DuplicateOutput -Recurse -Force
+            Remove-ReportingTestEntry -Path $DuplicateOutput
         }
     }
 }
 
 # Teste 22 - Validar conteúdo do CSV exportado
 Test-Result "Validar cabeçalhos e registros do CSV exportado" {
-    $CsvConfig = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-$CsvConfig = $CsvConfig | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-    $CsvOutput = Join-Path ([System.IO.Path]::GetTempPath()) ("Reporting-CSV-" + [guid]::NewGuid().ToString("N"))
+    $CsvConfig = Copy-ReportingTestConfiguration
+    $CsvOutput = Join-Path $TestWorkspace ("Reporting-CSV-" + [guid]::NewGuid().ToString("N"))
     $CsvConfig.Output.Directory = $CsvOutput
     $CsvConfig.Output.Formats = @("CSV")
     $CsvConfig.SimulationMode = $false
 
     try {
-        $CsvDataset = New-ReportingDataset -Configuration $CsvConfig
-        $CsvResult = Export-ReportingDataset -Configuration $CsvConfig -Dataset $CsvDataset
+        $CsvDataset = New-ReportingTestDataset -Configuration $CsvConfig
+        $CsvResult = Export-ReportingDataset -Configuration $CsvConfig -Dataset $CsvDataset -AllowRealOperation -AllowedRoot $TestWorkspace -Confirm:$false
         $CsvFile = @($CsvResult.Files | Where-Object { $_ -match '\.csv$' }) | Select-Object -First 1
 
         if (-not $CsvFile -or -not (Test-Path -LiteralPath $CsvFile)) {
@@ -756,10 +1165,195 @@ $CsvConfig = $CsvConfig | ConvertTo-Json -Depth 20 | ConvertFrom-Json
     }
     finally {
         if (Test-Path -LiteralPath $CsvOutput) {
-            Remove-Item -LiteralPath $CsvOutput -Recurse -Force
+            Remove-ReportingTestEntry -Path $CsvOutput
         }
     }
 }
+# TESTE 23 - Opções de inclusão aplicadas na exportação
+Test-Result "Aplicar opções de resumo, detalhes e timestamp" {
+    $OptionConfig = Copy-ReportingTestConfiguration
+    $OptionConfig.Reporting.IncludeSummary = $false
+    $OptionConfig.Reporting.IncludeTimestamp = $false
+    $OptionConfig.Output.Formats = @("JSON", "CSV")
+    $OptionOutput = Join-Path $TestWorkspace (
+        "Reporting-Options-" + [guid]::NewGuid().ToString("N")
+    )
+    $OptionConfig.Output.Directory = $OptionOutput
+    $OptionConfig.SimulationMode = $false
+
+    try {
+        $OptionDataset = New-ReportingTestDataset -Configuration $OptionConfig
+        $OptionExport = Export-ReportingDataset `
+            -Dataset $OptionDataset `
+            -Configuration $OptionConfig `
+            -AllowRealOperation `
+            -AllowedRoot $TestWorkspace `
+            -Confirm:$false
+
+        $JsonPath = @($OptionExport.Files | Where-Object { $_ -like "*.json" }) |
+            Select-Object -First 1
+        $DetailsPath = @($OptionExport.Files | Where-Object { $_ -like "*Details*.csv" }) |
+            Select-Object -First 1
+
+        if (-not $JsonPath -or -not $DetailsPath) {
+            throw "A exportação não gerou JSON e CSV de detalhes."
+        }
+
+        $Json = Get-Content -LiteralPath $JsonPath -Raw | ConvertFrom-Json
+        if ($null -ne $Json.Summary -or $null -ne $Json.GeneratedAt) {
+            throw "O JSON incluiu campos desativados na configuração."
+        }
+
+        if (@(Get-ChildItem -LiteralPath $OptionOutput -Filter "Reporting-Summary-*.csv" -File).Count -gt 0) {
+            throw "Foi exportado CSV de resumo apesar de IncludeSummary=false."
+        }
+
+        $DetailRows = @(Import-Csv -LiteralPath $DetailsPath)
+        if ($DetailRows.Count -eq 0 -or
+            $DetailRows[0].PSObject.Properties.Name -contains "GeneratedAt") {
+            throw "O CSV de detalhes está vazio ou incluiu timestamp desativado."
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $OptionOutput -PathType Container) {
+            Remove-ReportingTestEntry -Path $OptionOutput
+        }
+    }
+}
+
+# TESTE 24 - Falha de origem não relatada como sucesso
+Test-Result "Falhas ao processar fontes afetam o resultado geral" {
+    $InvalidJsonPath = Join-Path $TestInputDirectory "ComputerInventory_invalid.json"
+    Set-ReportingTestFixture -Path $InvalidJsonPath -Value "{ invalid json" -Encoding UTF8
+
+    Assert-ReportingTestConfigurationPaths -Configuration $Configuration
+    $Result = Invoke-Reporting -Configuration $Configuration -AllowedRoot $TestWorkspace
+
+    if ($Result.Success -ne $false -or $Result.Summary.FailedFiles -ne 1) {
+        throw "Falha de leitura de origem deveria tornar o resultado geral malsucedido."
+    }
+}
+
+# TESTE 25 - Configuração SimulationMode tipada
+Test-Result "Rejeitar SimulationMode não Boolean" {
+    $InvalidConfiguration = Copy-ReportingTestConfiguration
+    $InvalidConfiguration.SimulationMode = "true"
+
+    $Rejected = $false
+    try {
+        Test-ReportingConfiguration -Configuration $InvalidConfiguration |
+            Out-Null
+    }
+    catch {
+        $Rejected = $_.Exception.Message -match "SimulationMode"
+    }
+
+    if (-not $Rejected) {
+        throw "SimulationMode não Boolean deveria ser rejeitado."
+    }
+}
+
+# TESTE 26 - Opções de relatório tipadas
+Test-Result "Rejeitar flags de relatório não Boolean" {
+    $InvalidConfiguration = Copy-ReportingTestConfiguration
+    $InvalidConfiguration.Reporting.IncludeDetails = "true"
+
+    $Rejected = $false
+    try {
+        Test-ReportingConfiguration -Configuration $InvalidConfiguration |
+            Out-Null
+    }
+    catch {
+        $Rejected = $_.Exception.Message -match "IncludeDetails"
+    }
+
+    if (-not $Rejected) {
+        throw "Flags de relatório não Boolean deveriam ser rejeitadas."
+    }
+}
+
+# TESTE 27 - Fontes vazias são um dataset válido
+Test-Result "Aceitar dataset sem arquivos de origem" {
+    $EmptyDirectory = Join-Path $TestWorkspace "EmptyInput"
+    New-ReportingTestDirectory -Path $EmptyDirectory
+
+    $EmptyConfiguration = Copy-ReportingTestConfiguration
+    $EmptyConfiguration.Sources.ComputerInventory.Directory = $EmptyDirectory
+    $EmptyDataset = New-ReportingTestDataset -Configuration $EmptyConfiguration
+
+    if ($EmptyDataset.Summary.TotalFiles -ne 0 -or
+        $EmptyDataset.Summary.FailedFiles -ne 0) {
+        throw "O resumo vazio deveria conter zero arquivos e zero falhas."
+    }
+}
+
+# TESTE 28 - Bloquear exportação real sem autorização
+Test-Result "Bloquear exportação real sem AllowRealOperation" {
+    $UnauthorizedConfig = Copy-ReportingTestConfiguration
+    $UnauthorizedConfig.SimulationMode = $false
+    $UnauthorizedConfig.Output.Directory = Join-Path $TestWorkspace "UnauthorizedOutput"
+    $DatasetFixture = [PSCustomObject]@{ Files = @(); Summary = [PSCustomObject]@{ TotalFiles = 0 } }
+    Assert-ReportingTestConfigurationPaths -Configuration $UnauthorizedConfig
+
+    $Blocked = $false
+    try {
+        Export-ReportingDataset -Dataset $DatasetFixture -Configuration $UnauthorizedConfig -AllowedRoot $TestWorkspace | Out-Null
+    }
+    catch {
+        $Blocked = $_.Exception.Message -match "AllowRealOperation"
+    }
+
+    if (-not $Blocked -or (Test-Path -LiteralPath $UnauthorizedConfig.Output.Directory)) {
+        throw "A exportação sem autorização não foi bloqueada antes de criar o destino."
+    }
+}
+
+# TESTE 29 - WhatIf não lê fontes nem grava arquivos
+Test-Result "WhatIf retorna Preview sem materializar dataset ou saída" {
+    $PreviewConfig = Copy-ReportingTestConfiguration
+    $PreviewConfig.SimulationMode = $false
+    $PreviewConfig.Output.Directory = Join-Path $TestWorkspace "WhatIfOutput"
+    $PreviewConfig.Sources.ComputerInventory.Directory = Join-Path $TestWorkspace "MissingInput"
+
+    Assert-ReportingTestConfigurationPaths `
+        -Configuration $PreviewConfig `
+        -AllowMissingSource
+    $PreviewResult = Invoke-Reporting -Configuration $PreviewConfig -WhatIf
+
+    if ($PreviewResult.Mode -ne "Preview" -or
+        $PreviewResult.Cancelled -ne $false -or
+        $PreviewResult.SimulationMode -ne $false -or
+        (Test-Path -LiteralPath $PreviewConfig.Output.Directory)) {
+        throw "WhatIf não retornou Preview sem criar a pasta de saída."
+    }
+}
+
+# TESTE 30 - Rejeitar destinos fora da raiz autorizada
+Test-Result "Rejeitar caminho absoluto fora de AllowedRoot" {
+    $OutsideConfig = Copy-ReportingTestConfiguration
+    $OutsideConfig.SimulationMode = $false
+    $OutsideConfig.Output.Directory = Join-Path ([System.IO.Path]::GetTempPath()) ("Reporting-Outside-" + [guid]::NewGuid().ToString("N"))
+    $DatasetFixture = [PSCustomObject]@{ Files = @(); Summary = [PSCustomObject]@{ TotalFiles = 0 } }
+
+    $Rejected = $false
+    try {
+        Export-ReportingDataset -Dataset $DatasetFixture -Configuration $OutsideConfig -AllowRealOperation -AllowedRoot $TestWorkspace -Confirm:$false | Out-Null
+    }
+    catch {
+        $Rejected = $_.Exception.Message -match "fora da raiz permitida"
+    }
+
+    if (-not $Rejected) {
+        throw "Um destino externo à raiz permitida não foi rejeitado."
+    }
+}
+}
+finally {
+    if ($TestWorkspaceCreated) {
+        Remove-ReportingTestEntry -Path $TestWorkspace -AllowRoot
+    }
+}
+
 Write-Host "             RESULTADO DOS TESTES" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""

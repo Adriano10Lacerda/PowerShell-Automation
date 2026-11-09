@@ -145,6 +145,15 @@ if (Test-Path -LiteralPath $guiPath -PathType Leaf) {
         }
     }
 
+    Invoke-GuiTest "Campo de nome da GPO disponível para consultas" {
+        if ($source -notmatch 'x:Name="txtGPOName"') {
+            throw "Campo txtGPOName não encontrado."
+        }
+        if ($source -notmatch '(?s)function\s+Invoke-GuiGpoAction.*?-GPOName\s+\$GPOName') {
+            throw "As consultas GPO não utilizam o nome informado na interface."
+        }
+    }
+
     Invoke-GuiTest "Modo de simulação indicado visualmente" {
         if ($source -notmatch 'SIMULATION MODE') {
             throw "Indicador visual de simulação não encontrado."

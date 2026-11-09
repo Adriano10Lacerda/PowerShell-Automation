@@ -223,6 +223,11 @@ Add-Type -AssemblyName WindowsBase
             Padding="10,7" Margin="0,0,8,6"/>
 </WrapPanel>
 <WrapPanel Margin="0,0,0,10">
+    <TextBlock Text="Nome da GPO:" VerticalAlignment="Center"
+               Margin="0,0,8,6" Foreground="#344563"/>
+    <TextBox x:Name="txtGPOName" Width="220"
+             Padding="7,5" Margin="0,0,8,6"
+             Text="GPO-Desktop-Security"/>
     <Button x:Name="btnGPOList" Content="Listar GPOs"
             Padding="10,7" Margin="0,0,8,6"/>
     <Button x:Name="btnGPOCheck" Content="Consultar GPO"
@@ -367,6 +372,12 @@ function Invoke-GuiGpoAction {
             throw "Modo de simulação desativado. Operação cancelada."
         }
 
+        $GPOName = [string]$window.FindName("txtGPOName").Text
+        $GPOName = $GPOName.Trim()
+        if ($Acao -ne "Listar" -and [string]::IsNullOrWhiteSpace($GPOName)) {
+            throw "Informe o nome da GPO antes de consultar."
+        }
+
         switch ($Acao) {
             "Listar" {
                 $dados = @(Get-GPOList -Configuration $script:GuiGpoConfig)
@@ -377,14 +388,14 @@ function Invoke-GuiGpoAction {
             }
             "Consultar" {
                 $dados = Test-GPOExists `
-                    -GPOName "GPO-Desktop-Security" `
+                    -GPOName $GPOName `
                     -Configuration $script:GuiGpoConfig
                 $texto = $dados | Format-List | Out-String -Width 160
-                $script:GuiGpoStatus.Text = "Consulta concluída: GPO-Desktop-Security."
+                $script:GuiGpoStatus.Text = "Consulta concluída: $GPOName."
             }
             "Vinculos" {
                 $dados = @(Get-GPOLinks `
-                    -GPOName "GPO-Desktop-Security" `
+                    -GPOName $GPOName `
                     -Configuration $script:GuiGpoConfig)
 
                 if ($dados.Count -gt 0) {

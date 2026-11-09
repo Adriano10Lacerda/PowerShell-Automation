@@ -239,8 +239,14 @@ function Test-EntraUserExists {
         [string]$UserPrincipalName,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealRead
     )
+
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "SimulationMode deve ser definido explicitamente como Boolean."
+    }
 
     # ============================================================
     # Simulation Mode
@@ -262,6 +268,10 @@ function Test-EntraUserExists {
         }
 
         return $false
+    }
+
+    if (-not $AllowRealRead) {
+        throw "Consulta real do Microsoft Graph bloqueada. Informe -AllowRealRead explicitamente."
     }
 
     # ============================================================
@@ -311,8 +321,30 @@ function Test-EntraTenantConnection {
 
     param (
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealRead
     )
+
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "SimulationMode deve ser definido explicitamente como Boolean."
+    }
+
+    if ($Configuration.SimulationMode -eq $true) {
+        return [PSCustomObject]@{
+            Connected  = $false
+            Simulation = $true
+            TenantId   = $null
+            Account    = $null
+            AuthType   = $null
+            Scopes     = @()
+            Message    = "A sessão Graph não foi consultada em SimulationMode."
+        }
+    }
+
+    if (-not $AllowRealRead) {
+        throw "Consulta real do Microsoft Graph bloqueada. Informe -AllowRealRead explicitamente."
+    }
 
     # ============================================================
     # Verificar Microsoft Graph
@@ -386,8 +418,14 @@ function Test-EntraUserPostProvisioning {
         [string]$UserId,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$ExpectedUser
+        [PSCustomObject]$ExpectedUser,
+
+        [switch]$AllowRealRead
     )
+
+    if (-not $AllowRealRead) {
+        throw "Pós-validação real do Microsoft Graph bloqueada. Informe -AllowRealRead explicitamente."
+    }
 
     # ============================================================
     # Verificar comando
@@ -501,12 +539,17 @@ Retornado: $($CreatedUser.UserPrincipalName)
 
 function New-EntraUserProvision {
 
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
     param (
         [Parameter(Mandatory = $true)]
         [PSCustomObject]$User,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead
     )
 
         # ============================================================
@@ -524,6 +567,49 @@ function New-EntraUserProvision {
         -User $User `
         -Configuration $Configuration
 
+    if ($Configuration.SimulationMode -eq $false) {
+        if ($WhatIfPreference) {
+            return [PSCustomObject]@{
+                Success           = $false
+                Simulation        = $false
+                Mode              = "Preview"
+                PostValidation    = $false
+                Cancelled         = $false
+                UserPrincipalName = $User.UserPrincipalName
+                DisplayName       = $User.DisplayName
+                MailNickname      = $User.MailNickname
+                AccountEnabled    = $User.AccountEnabled
+                Message           = "Pré-visualização concluída. Nenhuma consulta ou alteração Graph foi realizada."
+            }
+        }
+
+        if (-not $AllowRealOperation) {
+            throw "Provisionamento real bloqueado. Informe -AllowRealOperation explicitamente."
+        }
+
+        if (-not $PSCmdlet.ShouldProcess(
+            $User.UserPrincipalName,
+            "Criar usuário no Microsoft Entra ID"
+        )) {
+            return [PSCustomObject]@{
+                Success = $false
+                Simulation = $false
+                Mode = "Preview"
+                PostValidation = $false
+                Cancelled = $true
+                UserPrincipalName = $User.UserPrincipalName
+                DisplayName = $User.DisplayName
+                MailNickname = $User.MailNickname
+                AccountEnabled = $User.AccountEnabled
+                Message = "Provisionamento não realizado: a operação foi recusada por ShouldProcess."
+            }
+        }
+
+        if (-not $AllowRealRead) {
+            throw "Consulta real do Microsoft Graph bloqueada. Informe -AllowRealRead explicitamente."
+        }
+    }
+
     # ============================================================
     # Verificar duplicidade
     # ============================================================
@@ -531,7 +617,8 @@ function New-EntraUserProvision {
     if (
         Test-EntraUserExists `
             -UserPrincipalName $User.UserPrincipalName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
     ) {
 
         throw "O usuário '$($User.UserPrincipalName)' já existe no Entra ID."
@@ -560,7 +647,8 @@ function New-EntraUserProvision {
     # ============================================================
 
     $null = Test-EntraTenantConnection `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead
 
     # ============================================================
     # Solicitar senha
@@ -639,7 +727,8 @@ function New-EntraUserProvision {
 
         $PostValidation = Test-EntraUserPostProvisioning `
             -UserId $CreatedUser.Id `
-            -ExpectedUser $User
+            -ExpectedUser $User `
+            -AllowRealRead:$AllowRealRead
 
         # ========================================================
         # Resultado final

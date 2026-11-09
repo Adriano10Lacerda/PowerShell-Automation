@@ -25,6 +25,33 @@ function Test-ADConfiguration {
         $Errors += "O campo 'SimulationMode' deve ser um valor booleano (true ou false)."
     }
 
+    if ($Configuration.SimulationMode -is [bool] -and
+        $Configuration.SimulationMode -eq $false) {
+
+        if ($null -eq $Configuration.Operations) {
+            $Errors += "A seção 'Operations' deve ser configurada para operações reais."
+        }
+        elseif ($Configuration.Operations.CreateUser -isnot [bool]) {
+            $Errors += "O campo 'Operations.CreateUser' deve ser um valor booleano."
+        }
+
+        if ($null -eq $Configuration.RealOperations) {
+            $Errors += "A seção 'RealOperations' deve ser configurada para operações reais."
+        }
+        else {
+            if ($Configuration.RealOperations.Enabled -isnot [bool]) {
+                $Errors += "O campo 'RealOperations.Enabled' deve ser um valor booleano."
+            }
+
+            if ($null -eq $Configuration.RealOperations.Operations) {
+                $Errors += "A seção 'RealOperations.Operations' deve ser configurada para operações reais."
+            }
+            elseif ($Configuration.RealOperations.Operations.CreateUser -isnot [bool]) {
+                $Errors += "O campo 'RealOperations.Operations.CreateUser' deve ser um valor booleano."
+            }
+        }
+    }
+
     # ========================================
     # Domain
     # ========================================
@@ -287,6 +314,55 @@ function Test-ADConfiguration {
     return $true
 }
 
+function Assert-ADRealOperationAuthorization {
+    param (
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory)]
+        [bool]$AllowRealOperation
+    )
+
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "Operação real bloqueada: 'SimulationMode' deve ser explicitamente booleano."
+    }
+
+    if ($Configuration.SimulationMode -ne $false) {
+        throw "Operação real bloqueada: 'SimulationMode' deve ser false."
+    }
+
+    if (-not $AllowRealOperation) {
+        throw "Operação real bloqueada: informe explicitamente -AllowRealOperation."
+    }
+
+    if ($null -eq $Configuration.RealOperations) {
+        throw "Operação real bloqueada: a seção 'RealOperations' deve estar configurada."
+    }
+
+    if ($null -eq $Configuration.Operations) {
+        throw "Operação real bloqueada: a seção 'Operations' deve estar configurada."
+    }
+
+    if ($null -eq $Configuration.RealOperations.Operations) {
+        throw "Operação real bloqueada: a seção 'RealOperations.Operations' deve estar configurada."
+    }
+
+    if ($Configuration.RealOperations.Enabled -isnot [bool] -or
+        $Configuration.RealOperations.Enabled -ne $true) {
+        throw "Operação real bloqueada: 'RealOperations.Enabled' deve ser explicitamente true."
+    }
+
+    if ($Configuration.Operations.CreateUser -isnot [bool] -or
+        $Configuration.Operations.CreateUser -ne $true) {
+        throw "Operação real bloqueada: 'Operations.CreateUser' deve ser explicitamente true."
+    }
+
+    if ($Configuration.RealOperations.Operations.CreateUser -isnot [bool] -or
+        $Configuration.RealOperations.Operations.CreateUser -ne $true) {
+        throw "Operação real bloqueada: 'RealOperations.Operations.CreateUser' deve ser explicitamente true."
+    }
+}
+
 # ============================================
 # Testar conectividade com Active Directory
 # ============================================
@@ -294,8 +370,14 @@ function Test-ADConfiguration {
 function Test-ADConnectivity {
     param (
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
+
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "Operação bloqueada: 'SimulationMode' deve ser explicitamente booleano."
+    }
 
     # ========================================
     # Simulação offline
@@ -311,6 +393,10 @@ function Test-ADConnectivity {
             Message = "Modo de simulação ativo. Nenhuma conexão com o Active Directory foi realizada."
         }
     }
+
+    Assert-ADRealOperationAuthorization `
+        -Configuration $Configuration `
+        -AllowRealOperation $AllowRealOperation.IsPresent
 
     # ========================================
     # Verificar módulo ActiveDirectory
@@ -378,11 +464,17 @@ function Test-ADUserExists {
         [string]$SamAccountName,
 
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
 
     if ([string]::IsNullOrWhiteSpace($SamAccountName)) {
         throw "O SamAccountName é obrigatório para realizar a consulta."
+    }
+
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "Operação bloqueada: 'SimulationMode' deve ser explicitamente booleano."
     }
 
     if ($Configuration.SimulationMode -eq $true) {
@@ -397,6 +489,10 @@ function Test-ADUserExists {
 
         return $false
     }
+
+    Assert-ADRealOperationAuthorization `
+        -Configuration $Configuration `
+        -AllowRealOperation $AllowRealOperation.IsPresent
 
     if ([string]::IsNullOrWhiteSpace($Configuration.DomainController)) {
         throw "O DomainController deve ser configurado para consultar o Active Directory."
@@ -651,8 +747,20 @@ function Get-UniqueADSamAccountName {
         [Parameter(Mandatory)]
         [PSCustomObject]$Configuration,
 
-        [string[]]$ExistingSamAccountNames = @()
+        [string[]]$ExistingSamAccountNames = @(),
+
+        [switch]$AllowRealOperation
     )
+
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "Operação real bloqueada: 'SimulationMode' deve ser explicitamente booleano."
+    }
+
+    if ($Configuration.SimulationMode -eq $false) {
+        Assert-ADRealOperationAuthorization `
+            -Configuration $Configuration `
+            -AllowRealOperation $AllowRealOperation.IsPresent
+    }
 
     if (-not $Configuration.DuplicateHandling.Enabled) {
         return $SamAccountName
@@ -794,12 +902,15 @@ function Get-UniqueADSamAccountName {
 # ============================================
 
 function New-ADUserProvision {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param (
         [Parameter(Mandatory)]
         [PSCustomObject]$User,
 
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation
     )
 
     # ========================================
@@ -861,6 +972,10 @@ function New-ADUserProvision {
     # Modo de simulação
     # ========================================
 
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        throw "Operação bloqueada: 'SimulationMode' deve ser explicitamente booleano."
+    }
+
     if ($Configuration.SimulationMode -eq $true) {
 
         Write-Host ""
@@ -887,6 +1002,26 @@ function New-ADUserProvision {
         }
     }
 
+    if (-not $WhatIfPreference) {
+        Assert-ADRealOperationAuthorization `
+            -Configuration $Configuration `
+            -AllowRealOperation $AllowRealOperation.IsPresent
+    }
+
+    if (-not $PSCmdlet.ShouldProcess(
+        $Configuration.TargetOU,
+        "Criar usuário $($User.SamAccountName)"
+    )) {
+        return [PSCustomObject]@{
+            Success           = $false
+            Simulation        = $false
+            Performed         = $false
+            SamAccountName    = $User.SamAccountName
+            DistinguishedName = $null
+            Message           = "Provisionamento não realizado."
+        }
+    }
+
     # ========================================
     # Validar Domain Controller
     # ========================================
@@ -909,6 +1044,7 @@ function New-ADUserProvision {
 
     $ADConnectivity = Test-ADConnectivity `
         -Configuration $Configuration `
+        -AllowRealOperation:$AllowRealOperation.IsPresent `
         -ErrorAction Stop
 
     if (-not $ADConnectivity.Connected) {
@@ -921,7 +1057,8 @@ function New-ADUserProvision {
 
     if (Test-ADUserExists `
         -SamAccountName $User.SamAccountName `
-        -Configuration $Configuration) {
+        -Configuration $Configuration `
+        -AllowRealOperation:$AllowRealOperation.IsPresent) {
 
         throw "O usuário '$($User.SamAccountName)' já existe no Active Directory."
     }
@@ -953,6 +1090,7 @@ function New-ADUserProvision {
         return [PSCustomObject]@{
             Success           = $true
             Simulation        = $false
+            Performed         = $true
             SamAccountName    = $CreatedUser.SamAccountName
             DistinguishedName = $CreatedUser.DistinguishedName
             Message           = "Usuário criado com sucesso no Active Directory."
@@ -969,6 +1107,7 @@ function New-ADUserProvision {
 
 Export-ModuleMember -Function `
     Test-ADConfiguration, `
+    Assert-ADRealOperationAuthorization, `
     Test-ADConnectivity, `
     Test-ADUserExists, `
     Test-ADUserProvisioning, `

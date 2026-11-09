@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -22,6 +22,14 @@
 #>
 
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Management -ErrorAction Stop
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+$global:PSModuleAutoLoadingPreference = 'None'
+Write-Output 'HARNESS_START:INTERFACE_V2_V1'
+
+if (Microsoft.PowerShell.Core\Get-Module -Name ActiveDirectory) {
+    throw "ActiveDirectory já está carregado neste processo; o teste da Interface não continuará."
+}
 
 $script:Passed = 0
 $script:Failed = 0
@@ -106,6 +114,11 @@ try {
         -Force `
         -ErrorAction Stop
 
+    $interfaceModules = @(Get-Module | Where-Object { $_.Path -eq [System.IO.Path]::GetFullPath($functionsPath) })
+    if ($interfaceModules.Count -ne 1) { throw "Esperada uma instância Interface V2; encontradas $($interfaceModules.Count)." }
+    $interfaceModule = $interfaceModules[0]
+    $entryPointModule = & $interfaceModule { (Get-Command Start-V2UserManagement -CommandType Function -ErrorAction Stop).Module }
+    if ($entryPointModule -ne $interfaceModule) { throw 'A função pública não resolve para a instância Interface V2 esperada.' }
     $moduleImported = $true
 }
 catch {
@@ -251,6 +264,135 @@ Write-TestResult `
 Write-TestResult `
     "Erros da consulta de computador são tratados" `
     ($moduleContent -match "ErrorCount")
+
+Write-TestResult `
+    "Consulta inicial do Computer Management inicia em SimulationMode" `
+    ($moduleContent -match '\$nextMode\s*=\s*"Simulation"')
+
+Write-TestResult `
+    "Coleta real exige confirmação digitada por execução" `
+    ($moduleContent -match 'COLETAR REAL' -and $moduleContent -match '\$confirmation\s+-ceq\s+"COLETAR REAL"')
+
+Write-TestResult `
+    "Recusa na Interface cria retorno Success falso e Cancelled verdadeiro" `
+    ($moduleContent -match '(?s)if \(\$nextMode -eq "Cancelled"\).*?Status = "Cancelled".*?Cancelled = \$true; Success = \$false')
+
+Write-TestResult `
+    "Autorização real é limpa após uma consulta" `
+    ($moduleContent -match '(?s)autorização vale somente para esta chamada.*?\$nextMode\s*=\s*"Simulation"')
+
+# Exercita o fluxo real da função com todos os pontos de entrada externos
+# substituídos dentro do escopo do módulo. Nenhum módulo/host/rede é acessado.
+$interfaceRuntimeSafe = $false
+$interfaceCapturedCalls = @()
+if ($null -ne $interfaceModule) {
+    try {
+        $interfaceCapturedCalls = & $interfaceModule {
+            $script:V2TestInputQueue = @("PC-FIXTURE", "1", "P", "1", "R", "COLETAR REAL", "1", "S", "0")
+            $script:V2TestCapturedCalls = @()
+            $script:V2TestHeaders = @()
+            Set-Item Function:\script:Test-Path { $true } -Force
+            Set-Item Function:\script:Import-Module { } -Force
+            Set-Item Function:\script:Read-Host {
+                param([string]$Prompt)
+                $answer = $script:V2TestInputQueue[0]
+                $script:V2TestInputQueue = @($script:V2TestInputQueue | Select-Object -Skip 1)
+                return $answer
+            } -Force
+            Set-Item Function:\script:Write-V2Header {
+                param([string]$Title, [string]$Subtitle)
+                $script:V2TestHeaders += $Subtitle
+            } -Force
+            Set-Item Function:\script:Pause-V2 { } -Force
+            Set-Item Function:\script:Show-V2ComputerSummary { } -Force
+            Set-Item Function:\script:Show-V2ComputerDetails { } -Force
+            Set-Item Function:\script:Start-Sleep { } -Force
+            Set-Item Function:\script:Get-ComputerManagementSummary {
+                [CmdletBinding()]
+                param([string]$Hostname, [switch]$SimulationMode, [switch]$Preview, [switch]$AllowRealOperation)
+                $script:V2TestCapturedCalls += @(@{
+                    Hostname = $Hostname
+                    SimulationMode = [bool]$SimulationMode
+                    Preview = [bool]$Preview
+                    AllowRealOperation = [bool]$AllowRealOperation
+                })
+                [PSCustomObject]@{
+                    Hostname = $Hostname; Status = "Simulated"; ADFound = $null; Reachable = $null
+                    OperatingSystem = $null; Model = $null; MemoryGB = $null; Processor = $null
+                    BitLockerStatus = "NotCollected"; ErrorCount = 0; SimulationMode = [bool]$SimulationMode
+                    Preview = [bool]$Preview; Mode = if ($AllowRealOperation) { "Real" } elseif ($Preview) { "Preview" } else { "Simulation" }
+                    Cancelled = $false; Success = $true; IsSimulated = [bool]$SimulationMode
+                }
+            } -Force
+            Start-V2ComputerManagement
+            return ,$script:V2TestCapturedCalls
+        }
+        $interfaceRuntimeSafe = $true
+    }
+    catch {
+        $interfaceRuntimeSafe = $false
+    }
+}
+
+Write-TestResult "Harness da Interface executou somente com stubs" $interfaceRuntimeSafe
+Write-TestResult "Interface encaminhou a consulta inicial como SimulationMode" ($interfaceCapturedCalls.Count -ge 4 -and $interfaceCapturedCalls[0].SimulationMode -and -not $interfaceCapturedCalls[0].AllowRealOperation)
+Write-TestResult "Interface encaminhou Preview sem autorização real" ($interfaceCapturedCalls.Count -ge 4 -and $interfaceCapturedCalls[1].Preview -and -not $interfaceCapturedCalls[1].AllowRealOperation)
+Write-TestResult "Interface encaminhou autorização real somente após escolha e confirmação" ($interfaceCapturedCalls.Count -ge 4 -and $interfaceCapturedCalls[2].AllowRealOperation -and -not $interfaceCapturedCalls[1].AllowRealOperation)
+Write-TestResult "Interface voltou à simulação após consulta real" ($interfaceCapturedCalls.Count -ge 4 -and $interfaceCapturedCalls[3].SimulationMode -and -not $interfaceCapturedCalls[3].AllowRealOperation)
+
+$declinedAuthorizationCalls = @()
+$declinedAuthorizationPresentedCancellation = $false
+if ($interfaceRuntimeSafe) {
+    $declinedRun = & $interfaceModule {
+        $script:V2TestInputQueue = @("PC-FIXTURE", "1", "R", "NAO", "1", "S", "0")
+        $script:V2TestCapturedCalls = @()
+        $script:V2TestHeaders = @()
+        Start-V2ComputerManagement
+        [PSCustomObject]@{ Calls = @($script:V2TestCapturedCalls); Headers = @($script:V2TestHeaders) }
+    }
+    $declinedAuthorizationCalls = @($declinedRun.Calls)
+    $declinedAuthorizationPresentedCancellation = $declinedRun.Headers -contains "Coleta cancelada"
+}
+Write-TestResult "Recusa de autorização real é apresentada como cancelamento" $declinedAuthorizationPresentedCancellation
+Write-TestResult "Recusa de autorização não chama Management/Core naquela consulta" ($declinedAuthorizationCalls.Count -eq 2 -and @($declinedAuthorizationCalls | Where-Object { $_.AllowRealOperation -or $_.Preview }).Count -eq 0)
+
+# Verify the real pure state formatter used by the UI. It has no I/O boundary.
+$computerDisplayCases = @{}
+if ($null -ne $interfaceModule) {
+    $computerDisplayCases = & $interfaceModule {
+        $base = @{
+            Hostname="PC-FIXTURE"; Status="Preview"; ADFound=$null; Reachable=$null
+            OperatingSystem=$null; Model=$null; MemoryGB=$null; Processor=$null
+            BitLockerStatus="NotCollected"; ErrorCount=0; SimulationMode=$false
+            Preview=$true; Mode="Preview"; Cancelled=$false; IsSimulated=$false
+            CollectionStatus="Preview"; ADQueryStatus="NotQueried"; ConnectivityStatus="NotQueried"
+        }
+        $makeDisplayCase = {
+            param([hashtable]$Changes)
+            $values = @{}
+            foreach ($key in $base.Keys) { $values[$key] = $base[$key] }
+            foreach ($key in $Changes.Keys) { $values[$key] = $Changes[$key] }
+            return [PSCustomObject]$values
+        }
+        $cases = @{
+            Preview = [PSCustomObject]$base
+            Simulation = (& $makeDisplayCase @{ Status="Simulated"; SimulationMode=$true; Preview=$false; Mode="Simulation"; IsSimulated=$true; CollectionStatus="Simulation" })
+            Found = (& $makeDisplayCase @{ Status="Online"; Preview=$false; Mode="Real"; CollectionStatus="Complete"; ADQueryStatus="Found"; ADFound=$true; ConnectivityStatus="Responded"; Reachable=$true })
+            NotFound = (& $makeDisplayCase @{ Status="Unavailable"; Preview=$false; Mode="Real"; CollectionStatus="Complete"; ADQueryStatus="NotFound"; ADFound=$false; ConnectivityStatus="NoResponse"; Reachable=$false })
+            ErrorPartial = (& $makeDisplayCase @{ Status="Unknown"; Preview=$false; Mode="Real"; CollectionStatus="Partial"; ErrorCount=1; ADQueryStatus="Error"; ConnectivityStatus="Error" })
+            Unknown = (& $makeDisplayCase @{ Status="Unknown"; Preview=$false; Mode="Real"; CollectionStatus="Complete"; ADQueryStatus="UnexpectedState"; ConnectivityStatus="UnexpectedState"; ADFound=$false; Reachable=$false })
+        }
+        $output = @{}
+        foreach ($name in $cases.Keys) { $output[$name] = Resolve-V2ComputerSummaryState -Summary $cases[$name] }
+        return $output
+    }
+}
+Write-TestResult "Preview é pré-visualização sem mensagem de simulação" ($computerDisplayCases.Preview.ModeMessage -match "Pré-visualização")
+Write-TestResult "Simulation identifica claramente dados fictícios" ($computerDisplayCases.Simulation.ModeMessage -match "Dados demonstrativos fictícios")
+Write-TestResult "Found exige estado explícito e resposta confirmada" ($computerDisplayCases.Found.ADMessage -eq "Sim" -and $computerDisplayCases.Found.ConnectivityMessage -eq "Sim")
+Write-TestResult "NotFound só é apresentado após estado explícito" ($computerDisplayCases.NotFound.ADMessage -eq "Não" -and $computerDisplayCases.NotFound.ConnectivityMessage -eq "Sem resposta confirmada")
+Write-TestResult "Erro de AD e coleta parcial são diferenciados" ($computerDisplayCases.ErrorPartial.ADMessage -eq "Erro na consulta" -and $computerDisplayCases.ErrorPartial.CollectionMessage -match "Coleta parcial")
+Write-TestResult "Estado desconhecido não usa boolean false como NotFound ou offline" ($computerDisplayCases.Unknown.ADMessage -eq "Estado desconhecido" -and $computerDisplayCases.Unknown.ConnectivityMessage -eq "Estado desconhecido")
 
 
 # ============================================================
@@ -585,6 +727,128 @@ Write-TestResult `
 
 
 # ============================================================
+$authorizationContract = & $interfaceModule {
+    $script:AuthorizationQueue = @('AUTORIZAR LEITURA', 'AUTORIZAR ALTERAÇÃO', 'NAO')
+    Set-Item Function:\script:Read-Host {
+        param([string]$Prompt)
+        $answer = $script:AuthorizationQueue[0]
+        $script:AuthorizationQueue = @($script:AuthorizationQueue | Select-Object -Skip 1)
+        return $answer
+    } -Force
+    [PSCustomObject]@{
+        ReadAccepted = Request-V2OneTimeAuthorization -Kind Read -Target 'fixture'
+        WriteAccepted = Request-V2OneTimeAuthorization -Kind Write -Target 'fixture'
+        DeclineAccepted = Request-V2OneTimeAuthorization -Kind Write -Target 'fixture'
+    }
+}
+Write-TestResult "Interface exige frases distintas para leitura e escrita" ($authorizationContract.ReadAccepted -and $authorizationContract.WriteAccepted)
+Write-TestResult "Autorização recusada não é reutilizada" (-not $authorizationContract.DeclineAccepted)
+Write-TestResult "Interface encaminha AllowRealRead e AllowRealWrite explicitamente" ($moduleContent -match '-AllowRealRead' -and $moduleContent -match '-AllowRealWrite')
+Write-TestResult "Interface não usa AllowRealOperation como autorização de escrita User/Group" ($moduleContent -notmatch 'Invoke-User(?:Unlock|Enable|Disable|ForcePasswordChange)Account\s+`(?s:.*?)AllowRealOperation' -and $moduleContent -notmatch 'Invoke-Group(?:Add|Remove)Member\s+`(?s:.*?)AllowRealOperation')
+
+$userAuthorizationFlow = & $interfaceModule {
+    $script:InputQueue = @('AUTORIZAR LEITURA','S','AUTORIZAR ALTERAÇÃO')
+    $script:Captured = @{}
+    Set-Item Function:\script:Read-Host { param([string]$Prompt); $v=$script:InputQueue[0]; $script:InputQueue=@($script:InputQueue | Select-Object -Skip 1); $v } -Force
+    Set-Item Function:\script:Pause-V2 { } -Force
+    Set-Item Function:\script:Test-Path { $true } -Force
+    Set-Item Function:\script:Import-Module { } -Force
+    Set-Item Function:\script:Write-V2Header { } -Force
+    Set-Item Function:\script:Get-UserUnlockPreview { param([string]$SamAccountName,[PSCustomObject]$Configuration,[switch]$AllowRealRead); $script:Captured.PreviewRead=[bool]$AllowRealRead; [PSCustomObject]@{Success=$true;SamAccountName=$SamAccountName;SimulationMode=$false;CanExecute=$true;Preview=[PSCustomObject]@{Description='fixture';CurrentState='Locked';TargetState='Unlocked'}} } -Force
+    Set-Item Function:\script:Invoke-UserUnlockAccount { param([string]$SamAccountName,[PSCustomObject]$Configuration,[switch]$Execute,[switch]$AllowRealRead,[switch]$AllowRealWrite); $script:Captured.InvokeRead=[bool]$AllowRealRead; $script:Captured.InvokeWrite=[bool]$AllowRealWrite; [PSCustomObject]@{Success=$true;Status='Executed';Executed=$true;Changed=$true;Audit=$null} } -Force
+    Set-Item Function:\script:Show-V2ExecutionResult { } -Force
+    Start-V2UserUnlockAccount -SamAccountName 'fixture.user' -Configuration ([PSCustomObject]@{SimulationMode=$false})
+    return $script:Captured
+}
+Write-TestResult "User Interface encaminha autorizações separadas de uma operação" ($userAuthorizationFlow.PreviewRead -and $userAuthorizationFlow.InvokeRead -and $userAuthorizationFlow.InvokeWrite)
+
+$userDeclinedWriteFlow = & $interfaceModule {
+    $script:InputQueue = @('AUTORIZAR LEITURA','S','NO')
+    $script:Captured = @{ Invoked=$false }
+    Set-Item Function:\script:Read-Host { param([string]$Prompt); $v=$script:InputQueue[0]; $script:InputQueue=@($script:InputQueue | Select-Object -Skip 1); $v } -Force
+    Set-Item Function:\script:Invoke-UserUnlockAccount { $script:Captured.Invoked=$true } -Force
+    Start-V2UserUnlockAccount -SamAccountName 'fixture.user' -Configuration ([PSCustomObject]@{SimulationMode=$false})
+    return $script:Captured
+}
+Write-TestResult "Recusa User write impede chamada e não reutiliza autorização" (-not $userDeclinedWriteFlow.Invoked)
+
+$groupAuthorizationFlow = & $interfaceModule {
+    $script:InputQueue = @('fixture.user','AUTORIZAR LEITURA','S','AUTORIZAR ALTERAÇÃO')
+    $script:Captured = @{}
+    Set-Item Function:\script:Read-Host { param([string]$Prompt); $v=$script:InputQueue[0]; $script:InputQueue=@($script:InputQueue | Select-Object -Skip 1); $v } -Force
+    Set-Item Function:\script:Pause-V2 { } -Force
+    Set-Item Function:\script:Write-V2Header { } -Force
+    Set-Item Function:\script:Get-GroupManagementPreview { param([string]$Action,[string]$GroupName,[string]$SamAccountName,[object]$Configuration,[switch]$AllowRealRead); $script:Captured.PreviewRead=[bool]$AllowRealRead; [PSCustomObject]@{Success=$true;SimulationMode=$false;Data=[PSCustomObject]@{GroupName=$GroupName;SamAccountName=$SamAccountName;CurrentState='NotMember';TargetState='Member';CanExecute=$true}} } -Force
+    Set-Item Function:\script:Invoke-GroupAddMember { param([string]$GroupName,[string]$SamAccountName,[object]$Configuration,[switch]$Execute,[switch]$AllowRealRead,[switch]$AllowRealWrite); $script:Captured.InvokeRead=[bool]$AllowRealRead; $script:Captured.InvokeWrite=[bool]$AllowRealWrite; [PSCustomObject]@{Success=$true;Status='Simulated';Data=$null} } -Force
+    Start-V2GroupAddMember -GroupName 'fixture.group' -Configuration ([PSCustomObject]@{SimulationMode=$false})
+    return $script:Captured
+}
+Write-TestResult "Group Interface encaminha leitura e escrita em chamadas distintas" ($groupAuthorizationFlow.PreviewRead -and $groupAuthorizationFlow.InvokeRead -and $groupAuthorizationFlow.InvokeWrite)
+
+$groupQueryMessages = & $interfaceModule {
+    @{
+        NotFound = Get-V2GroupQueryMessage -Result ([PSCustomObject]@{ QueryStatus = 'NotFound'; SimulationMode = $false })
+        Error = Get-V2GroupQueryMessage -Result ([PSCustomObject]@{ QueryStatus = 'Error'; SimulationMode = $false })
+        NotQueried = Get-V2GroupQueryMessage -Result ([PSCustomObject]@{ QueryStatus = 'NotQueried'; SimulationMode = $false })
+        Simulation = Get-V2GroupQueryMessage -Result ([PSCustomObject]@{ QueryStatus = 'Simulation'; SimulationMode = $true })
+        Cancelled = Get-V2GroupQueryMessage -Result ([PSCustomObject]@{ Status = 'Cancelled'; Cancelled = $true; SimulationMode = $false })
+    }
+}
+Write-TestResult "Group distingue NotFound de erro, consulta ausente, simulação e cancelamento" (
+    $groupQueryMessages.NotFound -match 'consulta foi concluída' -and
+    $groupQueryMessages.Error -match 'Erro durante a consulta' -and
+    $groupQueryMessages.NotQueried -match 'Consulta não realizada' -and
+    $groupQueryMessages.Simulation -match 'Dados demonstrativos' -and
+    $groupQueryMessages.Cancelled -match 'cancelada'
+)
+
+$userManagementControllerFlow = & $interfaceModule {
+    $script:V2ControllerInputQueue = @('fixture.user', 'R', 'CONSULTAR REAL', 'dc.fixture.invalid', '')
+    $script:V2ControllerCaptured = @()
+    Set-Item Function:\script:Test-Path { $true } -Force
+    Set-Item Function:\script:Import-Module { } -Force
+    Set-Item Function:\script:Read-Host {
+        param([string]$Prompt)
+        $answer = $script:V2ControllerInputQueue[0]
+        $script:V2ControllerInputQueue = @($script:V2ControllerInputQueue | Select-Object -Skip 1)
+        return $answer
+    } -Force
+    Set-Item Function:\script:Pause-V2 { } -Force
+    Set-Item Function:\script:Write-V2Header { } -Force
+    Set-Item Function:\script:Get-UserManagement {
+        param([string]$SamAccountName, [PSCustomObject]$Configuration, [switch]$AllowRealRead)
+        $script:V2ControllerCaptured += [PSCustomObject]@{
+            DomainController = $Configuration.DomainController
+            SimulationMode = $Configuration.SimulationMode
+            AllowRealRead = [bool]$AllowRealRead
+        }
+        [PSCustomObject]@{ Success = $false; Errors = @('Fixture stops before display') }
+    } -Force
+    Start-V2UserManagement
+    return ,$script:V2ControllerCaptured
+}
+Write-TestResult "User Management encaminha DomainController explícito e validado" (
+    $userManagementControllerFlow.Count -eq 1 -and
+    $userManagementControllerFlow[0].DomainController -eq 'dc.fixture.invalid' -and
+    -not $userManagementControllerFlow[0].SimulationMode -and
+    $userManagementControllerFlow[0].AllowRealRead
+)
+
+$emptyControllerCalls = & $interfaceModule {
+    $script:V2ControllerInputQueue = @('fixture.user', 'R', 'CONSULTAR REAL', '   ', '')
+    $script:V2ControllerCallCount = 0
+    Set-Item Function:\script:Read-Host {
+        param([string]$Prompt)
+        $answer = $script:V2ControllerInputQueue[0]
+        $script:V2ControllerInputQueue = @($script:V2ControllerInputQueue | Select-Object -Skip 1)
+        return $answer
+    } -Force
+    Set-Item Function:\script:Get-UserManagement { $script:V2ControllerCallCount++; throw 'Management must not be called for an empty controller.' } -Force
+    Start-V2UserManagement
+    return $script:V2ControllerCallCount
+}
+Write-TestResult "DomainController vazio impede chamada ao User Management" ($emptyControllerCalls -eq 0)
+
 # RESULTADO
 # ============================================================
 
@@ -602,6 +866,7 @@ Write-Host ""
 
 if ($script:Failed -eq 0) {
     Write-Host "INTERFACE V2: TODOS OS TESTES PASSARAM!" -ForegroundColor Green
+    Write-Output 'HARNESS_PASS:INTERFACE_V2_V1'
     exit 0
 }
 else {

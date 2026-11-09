@@ -145,18 +145,15 @@ Run the automated password generator tests:
 .\01-Password-Generator\Test-PasswordGenerator.ps1
 ```
 
-The automated tests cover password generation and validation behavior, including:
+The automated generator tests cover password generation behavior, including:
 
 - Password generation
 - Required character categories
 - Password length boundaries
-- Configuration validation
-- Supported date formats
-- Invalid date formats
-- Special character validation
-- Invalid configuration values
 
-The configuration module also has its own automated test suite:
+Configuration validation, supported/invalid date formats, special-character
+validation, and invalid configuration values are covered by the separate
+Configuration module suite:
 
 ```powershell
 .\02-Configuration\Test-Configuration.ps1

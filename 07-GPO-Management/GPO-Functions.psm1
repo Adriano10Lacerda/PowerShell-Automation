@@ -7,8 +7,8 @@ function Test-GPOConfiguration {
 
     $Errors = @()
 
-    if ($null -eq $Configuration.SimulationMode) {
-        $Errors += "A configuração 'SimulationMode' não foi definida."
+    if ($Configuration.SimulationMode -isnot [bool]) {
+        $Errors += "A configuração 'SimulationMode' deve ser um valor Booleano explícito."
     }
 
     if ($null -eq $Configuration.ActiveDirectory) {
@@ -23,14 +23,21 @@ function Test-GPOConfiguration {
         $Errors += "A seção 'Operations' não foi definida."
     }
 
-    if ($Configuration.SimulationMode -eq $true) {
+    foreach ($Operation in @("CheckGPO", "ListGPOs", "CreateGPO", "CheckLinks", "ListLinks")) {
 
+        $OperationFlag = $Configuration.Operations.PSObject.Properties[$Operation]
+        if ($null -eq $OperationFlag -or $OperationFlag.Value -isnot [bool]) {
+            $Errors += "A flag 'Operations.$Operation' deve existir e ser Booleana."
+        }
+    }
+
+    if ($Configuration.SimulationMode -eq $true) {
         if ($null -eq $Configuration.Simulation) {
             $Errors += "A seção 'Simulation' é obrigatória quando o modo de simulação está habilitado."
         }
-
-        elseif ($null -eq $Configuration.Simulation.ExistingGPOs) {
-            $Errors += "A propriedade 'Simulation.ExistingGPOs' não foi definida."
+        elseif ($null -eq $Configuration.Simulation.PSObject.Properties["ExistingGPOs"] -or
+            $null -eq $Configuration.Simulation.ExistingGPOs) {
+            $Errors += "A propriedade 'Simulation.ExistingGPOs' não foi definida ou é nula."
         }
     }
 
@@ -42,24 +49,48 @@ function Test-GPOConfiguration {
 }
 
 
-function Test-GPOConnectivity {
+function Assert-GPOOperationAuthorization {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("CheckGPO", "ListGPOs", "CreateGPO", "CheckLinks", "ListLinks")]
+        [string]$Operation,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AllowRealOperation
+    )
+
+    Test-GPOConfiguration -Configuration $Configuration | Out-Null
+
+    if ($Configuration.Operations.$Operation -ne $true) {
+        throw "A operação '$Operation' está desabilitada na configuração."
+    }
+
+    if ($Configuration.SimulationMode -eq $false) {
+        if (-not $AllowRealOperation) {
+            throw "A operação real '$Operation' exige a autorização explícita -AllowRealOperation."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($Configuration.ActiveDirectory.DomainController) -or
+            [string]::IsNullOrWhiteSpace($Configuration.ActiveDirectory.TargetDomain)) {
+            throw "DomainController e TargetDomain são obrigatórios para operações reais."
+        }
+    }
+}
+
+
+function Initialize-GPOConnection {
 
     param (
         [Parameter(Mandatory = $true)]
         [PSCustomObject]$Configuration
     )
 
-    if ($Configuration.SimulationMode -eq $true) {
-
-        return [PSCustomObject]@{
-            Connected  = $false
-            Simulation = $true
-            Message    = "Modo de simulação ativo. Nenhuma conexão com Active Directory foi realizada."
-        }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($Configuration.ActiveDirectory.DomainController)) {
-        throw "O DomainController é obrigatório quando o modo de simulação está desabilitado."
+    if ($Configuration.SimulationMode) {
+        throw "A conexão com Group Policy não pode ser inicializada em modo de simulação."
     }
 
     if (-not (Get-Module -ListAvailable -Name GroupPolicy)) {
@@ -70,23 +101,12 @@ function Test-GPOConnectivity {
 
         Import-Module GroupPolicy -ErrorAction Stop
 
-        $Domain = Get-GPO `
-            -All `
-            -Domain $Configuration.ActiveDirectory.TargetDomain `
-            -Server $Configuration.ActiveDirectory.DomainController `
-            -ErrorAction Stop
-
-        return [PSCustomObject]@{
-            Connected  = $true
-            Simulation = $false
-            Domain     = $Configuration.ActiveDirectory.TargetDomain
-            Message    = "Conexão com Active Directory validada com sucesso."
-        }
+        return $true
 
     }
     catch {
 
-        throw "Não foi possível validar a conexão com Active Directory/GPO. Detalhes: $($_.Exception.Message)"
+        throw "Não foi possível carregar o módulo GroupPolicy. Detalhes: $($_.Exception.Message)"
     }
 }
 
@@ -116,21 +136,30 @@ function Get-SimulatedGPO {
 }
 
 
-function Test-GPOExists {
+function Test-GPOExistsInternal {
 
     param (
         [Parameter(Mandatory = $true)]
         [string]$GPOName,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("CheckGPO", "CreateGPO", "CheckLinks", "ListLinks")]
+        [string]$Operation,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AllowRealOperation
     )
 
     if ([string]::IsNullOrWhiteSpace($GPOName)) {
         throw "O nome da GPO é obrigatório."
     }
 
-    if ($Configuration.SimulationMode -eq $true) {
+    Assert-GPOOperationAuthorization -Configuration $Configuration -Operation $Operation -AllowRealOperation:$AllowRealOperation
+
+    if ($Configuration.SimulationMode) {
 
         $GPO = Get-SimulatedGPO `
             -Configuration $Configuration `
@@ -143,7 +172,7 @@ function Test-GPOExists {
         }
     }
 
-    Test-GPOConnectivity -Configuration $Configuration | Out-Null
+    Initialize-GPOConnection -Configuration $Configuration | Out-Null
 
     try {
 
@@ -180,14 +209,39 @@ function Test-GPOExists {
 }
 
 
-function Get-GPOList {
+function Test-GPOExists {
 
+    [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [string]$GPOName,
+
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AllowRealOperation
     )
 
-    if ($Configuration.SimulationMode -eq $true) {
+    Assert-GPOOperationAuthorization -Configuration $Configuration -Operation CheckGPO -AllowRealOperation:$AllowRealOperation
+    Test-GPOExistsInternal -GPOName $GPOName -Configuration $Configuration -Operation CheckGPO -AllowRealOperation:$AllowRealOperation
+}
+
+
+function Get-GPOList {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AllowRealOperation
+    )
+
+    Assert-GPOOperationAuthorization -Configuration $Configuration -Operation ListGPOs -AllowRealOperation:$AllowRealOperation
+
+    if ($Configuration.SimulationMode) {
 
         if ($null -eq $Configuration.Simulation.ExistingGPOs) {
             return @()
@@ -207,7 +261,7 @@ function Get-GPOList {
         )
     }
 
-    Test-GPOConnectivity -Configuration $Configuration | Out-Null
+    Initialize-GPOConnection -Configuration $Configuration | Out-Null
 
     try {
 
@@ -239,6 +293,7 @@ function Get-GPOList {
 
 function New-GPOProvision {
 
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
     param (
         [Parameter(Mandatory = $true)]
         [string]$GPOName,
@@ -247,8 +302,13 @@ function New-GPOProvision {
         [string]$Description,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AllowRealOperation
     )
+
+    Assert-GPOOperationAuthorization -Configuration $Configuration -Operation CreateGPO -AllowRealOperation:$AllowRealOperation
 
     if ([string]::IsNullOrWhiteSpace($GPOName)) {
         throw "O nome da GPO é obrigatório."
@@ -261,15 +321,29 @@ function New-GPOProvision {
         }
     }
 
-    $Existing = Test-GPOExists `
+    $Target = "GPO '$GPOName'"
+    $Action = if ($Configuration.SimulationMode) { "Criar GPO simulada" } else { "Criar GPO no domínio" }
+    if (-not $PSCmdlet.ShouldProcess($Target, $Action)) {
+        return [PSCustomObject]@{
+            Success     = $false
+            Simulation  = $Configuration.SimulationMode
+            Name        = $GPOName
+            Description = $Description
+            Message     = "A criação não foi aprovada por ShouldProcess; nenhuma consulta ou alteração foi realizada."
+        }
+    }
+
+    $Existing = Test-GPOExistsInternal `
         -GPOName $GPOName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -Operation CreateGPO `
+        -AllowRealOperation:$AllowRealOperation
 
     if ($Existing.Exists -eq $true) {
         throw "A GPO '$GPOName' já existe."
     }
 
-    if ($Configuration.SimulationMode -eq $true) {
+    if ($Configuration.SimulationMode) {
 
         $NewGPO = [PSCustomObject]@{
             Name        = $GPOName
@@ -289,7 +363,7 @@ function New-GPOProvision {
         }
     }
 
-    Test-GPOConnectivity -Configuration $Configuration | Out-Null
+    Initialize-GPOConnection -Configuration $Configuration | Out-Null
 
     try {
 
@@ -322,25 +396,40 @@ function New-GPOProvision {
 }
 
 
-function Get-GPOLinks {
+function Get-GPOLinksInternal {
 
     param (
         [Parameter(Mandatory = $true)]
         [string]$GPOName,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("CheckLinks", "ListLinks")]
+        [string]$Operation,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AllowRealOperation
     )
 
-    $Existing = Test-GPOExists `
+    Assert-GPOOperationAuthorization -Configuration $Configuration -Operation $Operation -AllowRealOperation:$AllowRealOperation
+
+    if ([string]::IsNullOrWhiteSpace($GPOName)) {
+        throw "O nome da GPO é obrigatório."
+    }
+
+    $Existing = Test-GPOExistsInternal `
         -GPOName $GPOName `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -Operation $Operation `
+        -AllowRealOperation:$AllowRealOperation
 
     if ($Existing.Exists -eq $false) {
         throw "A GPO '$GPOName' não existe."
     }
 
-    if ($Configuration.SimulationMode -eq $true) {
+    if ($Configuration.SimulationMode) {
 
         $GPO = Get-SimulatedGPO `
             -Configuration $Configuration `
@@ -362,7 +451,7 @@ function Get-GPOLinks {
         )
     }
 
-    Test-GPOConnectivity -Configuration $Configuration | Out-Null
+    Initialize-GPOConnection -Configuration $Configuration | Out-Null
 
     try {
 
@@ -405,8 +494,27 @@ function Get-GPOLinks {
 }
 
 
+function Get-GPOLinks {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$GPOName,
+
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Configuration,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AllowRealOperation
+    )
+
+    Get-GPOLinksInternal -GPOName $GPOName -Configuration $Configuration -Operation CheckLinks -AllowRealOperation:$AllowRealOperation
+}
+
+
 function Invoke-GPOManagement {
 
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $true)]
         [ValidateSet(
@@ -425,21 +533,13 @@ function Invoke-GPOManagement {
         [string]$GPOName,
 
         [Parameter(Mandatory = $false)]
-        [string]$Description
+        [string]$Description,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AllowRealOperation
     )
 
-    Test-GPOConfiguration `
-        -Configuration $Configuration |
-        Out-Null
-
-    # Verificar se a operação está habilitada
-    if ($null -eq $Configuration.Operations) {
-        throw "A seção 'Operations' não foi definida na configuração."
-    }
-
-    if ($Configuration.Operations.$Operation -ne $true) {
-        throw "A operação '$Operation' está desabilitada na configuração."
-    }
+    Assert-GPOOperationAuthorization -Configuration $Configuration -Operation $Operation -AllowRealOperation:$AllowRealOperation
 
     switch ($Operation) {
 
@@ -447,28 +547,40 @@ function Invoke-GPOManagement {
 
             return Test-GPOExists `
                 -GPOName $GPOName `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -AllowRealOperation:$AllowRealOperation
         }
 
         "ListGPOs" {
 
             return Get-GPOList `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -AllowRealOperation:$AllowRealOperation
         }
 
         "CreateGPO" {
 
-            return New-GPOProvision `
-                -GPOName $GPOName `
-                -Description $Description `
-                -Configuration $Configuration
+            $CreateParameters = @{
+                GPOName            = $GPOName
+                Description        = $Description
+                Configuration      = $Configuration
+                AllowRealOperation = $AllowRealOperation
+            }
+            if ($PSBoundParameters.ContainsKey("WhatIf")) {
+                $CreateParameters["WhatIf"] = $WhatIf
+            }
+            if ($PSBoundParameters.ContainsKey("Confirm")) {
+                $CreateParameters["Confirm"] = $Confirm
+            }
+            return New-GPOProvision @CreateParameters
         }
 
         "CheckLinks" {
 
             return Get-GPOLinks `
                 -GPOName $GPOName `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -AllowRealOperation:$AllowRealOperation
         }
 
         "ListLinks" {
@@ -477,9 +589,11 @@ function Invoke-GPOManagement {
                 throw "O nome da GPO é obrigatório para listar os vínculos."
             }
 
-            return Get-GPOLinks `
+            return Get-GPOLinksInternal `
                 -GPOName $GPOName `
-                -Configuration $Configuration
+                -Configuration $Configuration `
+                -Operation ListLinks `
+                -AllowRealOperation:$AllowRealOperation
         }
     }
 }
@@ -487,7 +601,6 @@ function Invoke-GPOManagement {
 
 Export-ModuleMember -Function `
     Test-GPOConfiguration,
-    Test-GPOConnectivity,
     Test-GPOExists,
     Get-GPOList,
     New-GPOProvision,

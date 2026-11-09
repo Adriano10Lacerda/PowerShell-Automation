@@ -1,3 +1,10 @@
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
+param (
+    [switch]$AllowRealOperation,
+
+    [string]$AllowedRoot = $PSScriptRoot
+)
+
 $ErrorActionPreference = "Stop"
 
 # ============================================================
@@ -123,12 +130,46 @@ function Invoke-Report {
     Write-Host "Executando Reporting..." -ForegroundColor Yellow
     Write-Host ""
 
-    $Result = Invoke-Reporting `
-        -Configuration $Configuration
+    $ReportingParameters = @{
+        Configuration      = $Configuration
+        AllowRealOperation = $AllowRealOperation
+        AllowedRoot        = $AllowedRoot
+    }
+
+    if ($WhatIfPreference) {
+        $ReportingParameters.WhatIf = $true
+    }
+
+    if ($script:ConfirmWasBound) {
+        $ReportingParameters.Confirm = $script:ConfirmValue
+    }
+
+    $Result = Invoke-Reporting @ReportingParameters
+
+    if ($Result.Mode -eq "Preview") {
+        Write-Host $Result.Message -ForegroundColor Yellow
+        return
+    }
+
+    if ($Result.Cancelled -eq $true) {
+        Write-Host $Result.Message -ForegroundColor Yellow
+        return
+    }
+
+    if ($Result.Success -ne $true) {
+        Write-Host $Result.Message -ForegroundColor Red
+        return
+    }
 
     Write-Host ""
+    $ResultHeader = if ($Result.Mode -eq "Simulation") {
+        "       REPORTING SIMULADO"
+    }
+    else {
+        "       REPORTING EXECUTADO COM SUCESSO"
+    }
     Write-Host "=============================================" -ForegroundColor Green
-    Write-Host "       REPORTING EXECUTADO COM SUCESSO" -ForegroundColor Green
+    Write-Host $ResultHeader -ForegroundColor Green
     Write-Host "=============================================" -ForegroundColor Green
     Write-Host ""
 
@@ -158,6 +199,9 @@ function Invoke-Report {
 
     Write-Host ""
 }
+
+$script:ConfirmWasBound = $PSBoundParameters.ContainsKey('Confirm')
+$script:ConfirmValue = $Confirm
 
 
 # ============================================================

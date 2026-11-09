@@ -48,6 +48,15 @@ Import-Module `
     -Force `
     -ErrorAction Stop
 
+function Invoke-UserActionShouldProcess {
+    param(
+        [Parameter(Mandatory)] [System.Management.Automation.PSCmdlet]$Cmdlet,
+        [Parameter(Mandatory)] [string]$Target,
+        [Parameter(Mandatory)] [string]$Action
+    )
+    return $Cmdlet.ShouldProcess($Target, $Action)
+}
+
 
 # ============================================================
 # AUDITORIA
@@ -93,7 +102,11 @@ function Get-UserUnlockPreview {
         [string]$SamAccountName,
 
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead
     )
 
     try {
@@ -107,7 +120,25 @@ function Get-UserUnlockPreview {
 
         $userResult = Get-UserADInfo `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
+
+        if ($userResult.QueryStatus -eq "NotFound") {
+            return [PSCustomObject]@{
+                Success         = $false
+                Action          = "UnlockUserAccount"
+                SamAccountName  = $SamAccountName
+                SimulationMode  = [bool]$Configuration.SimulationMode
+                UserFound       = $false
+                LockedOut       = $false
+                CanExecute      = $false
+                RequiresConfirm = $false
+                Preview         = $null
+                Status          = "NotFound"
+                QueryStatus     = "NotFound"
+                Error           = $null
+            }
+        }
 
         if (-not $userResult.Success) {
             return [PSCustomObject]@{
@@ -193,7 +224,7 @@ function Get-UserUnlockPreview {
 # ============================================================
 
 function Invoke-UserUnlockAccount {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -203,7 +234,13 @@ function Invoke-UserUnlockAccount {
         [PSCustomObject]$Configuration,
 
         [Parameter()]
-        [switch]$Execute
+        [switch]$Execute,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$AllowRealWrite
     )
 
     $result = [PSCustomObject]@{
@@ -227,13 +264,26 @@ function Invoke-UserUnlockAccount {
             throw "Configuration não pode ser nula."
         }
 
+        if ($null -eq $Configuration.PSObject.Properties['SimulationMode'] -or $Configuration.SimulationMode -isnot [bool]) { throw 'SimulationMode deve ser definido explicitamente como Boolean.' }
         $result.SimulationMode = [bool]$Configuration.SimulationMode
+
+        if ($result.SimulationMode -and ($AllowRealRead -or $AllowRealWrite)) { $result.Error = "Modos conflitantes: SimulationMode não pode ser combinado com autorização real."; return $result }
+        if ($WhatIfPreference) { $result.Success = $true; $result.Status = "Preview"; $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"; $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false; return $result }
+        if (-not $result.SimulationMode -and -not $AllowRealRead) { $result.Error = "Leitura real bloqueada. Informe -AllowRealRead explicitamente."; return $result }
+        if (-not $result.SimulationMode -and $Execute -and -not $AllowRealWrite) { $result.Error = "Escrita real bloqueada. Informe -AllowRealWrite explicitamente."; return $result }
+        if (-not $result.SimulationMode -and $Execute -and -not (Invoke-UserActionShouldProcess -Cmdlet $PSCmdlet -Target $SamAccountName -Action "Desbloquear conta de usuário")) { $result.Status = "Cancelled"; $result.Error = "Operação cancelada pelo ShouldProcess."; $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $true; $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"; return $result }
 
         $preview = Get-UserUnlockPreview `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
 
         if (-not $preview.Success) {
+            if ($preview.QueryStatus -eq "NotFound") {
+                $result.Status = "NotFound"
+                $result | Add-Member -NotePropertyName QueryStatus -NotePropertyValue "NotFound"
+                return $result
+            }
             $result.Error = $preview.Error
             return $result
         }
@@ -373,7 +423,11 @@ function Get-UserEnablePreview {
         [string]$SamAccountName,
 
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead
     )
 
     try {
@@ -387,7 +441,25 @@ function Get-UserEnablePreview {
 
         $userResult = Get-UserADInfo `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
+
+        if ($userResult.QueryStatus -eq "NotFound") {
+            return [PSCustomObject]@{
+                Success         = $false
+                Action          = "EnableUserAccount"
+                SamAccountName  = $SamAccountName
+                SimulationMode  = [bool]$Configuration.SimulationMode
+                UserFound       = $false
+                Enabled         = $false
+                CanExecute      = $false
+                RequiresConfirm = $false
+                Preview         = $null
+                Status          = "NotFound"
+                QueryStatus     = "NotFound"
+                Error           = $null
+            }
+        }
 
         if (-not $userResult.Success) {
             return [PSCustomObject]@{
@@ -473,7 +545,7 @@ function Get-UserEnablePreview {
 # ============================================================
 
 function Invoke-UserEnableAccount {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -483,7 +555,13 @@ function Invoke-UserEnableAccount {
         [PSCustomObject]$Configuration,
 
         [Parameter()]
-        [switch]$Execute
+        [switch]$Execute,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$AllowRealWrite
     )
 
     $result = [PSCustomObject]@{
@@ -507,13 +585,26 @@ function Invoke-UserEnableAccount {
             throw "Configuration não pode ser nula."
         }
 
+        if ($null -eq $Configuration.PSObject.Properties['SimulationMode'] -or $Configuration.SimulationMode -isnot [bool]) { throw 'SimulationMode deve ser definido explicitamente como Boolean.' }
         $result.SimulationMode = [bool]$Configuration.SimulationMode
+
+        if ($result.SimulationMode -and ($AllowRealRead -or $AllowRealWrite)) { $result.Error = "Modos conflitantes: SimulationMode não pode ser combinado com autorização real."; return $result }
+        if ($WhatIfPreference) { $result.Success = $true; $result.Status = "Preview"; $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"; $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false; return $result }
+        if (-not $result.SimulationMode -and -not $AllowRealRead) { $result.Error = "Leitura real bloqueada. Informe -AllowRealRead explicitamente."; return $result }
+        if (-not $result.SimulationMode -and $Execute -and -not $AllowRealWrite) { $result.Error = "Escrita real bloqueada. Informe -AllowRealWrite explicitamente."; return $result }
+        if (-not $result.SimulationMode -and $Execute -and -not (Invoke-UserActionShouldProcess -Cmdlet $PSCmdlet -Target $SamAccountName -Action "Habilitar conta de usuário")) { $result.Status = "Cancelled"; $result.Error = "Operação cancelada pelo ShouldProcess."; $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $true; $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"; return $result }
 
         $preview = Get-UserEnablePreview `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
 
         if (-not $preview.Success) {
+            if ($preview.QueryStatus -eq "NotFound") {
+                $result.Status = "NotFound"
+                $result | Add-Member -NotePropertyName QueryStatus -NotePropertyValue "NotFound"
+                return $result
+            }
             $result.Error = $preview.Error
             return $result
         }
@@ -653,7 +744,11 @@ function Get-UserDisablePreview {
         [string]$SamAccountName,
 
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead
     )
 
     try {
@@ -667,7 +762,25 @@ function Get-UserDisablePreview {
 
         $userResult = Get-UserADInfo `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
+
+        if ($userResult.QueryStatus -eq "NotFound") {
+            return [PSCustomObject]@{
+                Success         = $false
+                Action          = "DisableUserAccount"
+                SamAccountName  = $SamAccountName
+                SimulationMode  = [bool]$Configuration.SimulationMode
+                UserFound       = $false
+                Enabled         = $false
+                CanExecute      = $false
+                RequiresConfirm = $false
+                Preview         = $null
+                Status          = "NotFound"
+                QueryStatus     = "NotFound"
+                Error           = $null
+            }
+        }
 
         if (-not $userResult.Success) {
             return [PSCustomObject]@{
@@ -753,7 +866,7 @@ function Get-UserDisablePreview {
 # ============================================================
 
 function Invoke-UserDisableAccount {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -763,7 +876,13 @@ function Invoke-UserDisableAccount {
         [PSCustomObject]$Configuration,
 
         [Parameter()]
-        [switch]$Execute
+        [switch]$Execute,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$AllowRealWrite
     )
 
     $result = [PSCustomObject]@{
@@ -787,13 +906,26 @@ function Invoke-UserDisableAccount {
             throw "Configuration não pode ser nula."
         }
 
+        if ($null -eq $Configuration.PSObject.Properties['SimulationMode'] -or $Configuration.SimulationMode -isnot [bool]) { throw 'SimulationMode deve ser definido explicitamente como Boolean.' }
         $result.SimulationMode = [bool]$Configuration.SimulationMode
+
+        if ($result.SimulationMode -and ($AllowRealRead -or $AllowRealWrite)) { $result.Error = "Modos conflitantes: SimulationMode não pode ser combinado com autorização real."; return $result }
+        if ($WhatIfPreference) { $result.Success = $true; $result.Status = "Preview"; $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"; $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false; return $result }
+        if (-not $result.SimulationMode -and -not $AllowRealRead) { $result.Error = "Leitura real bloqueada. Informe -AllowRealRead explicitamente."; return $result }
+        if (-not $result.SimulationMode -and $Execute -and -not $AllowRealWrite) { $result.Error = "Escrita real bloqueada. Informe -AllowRealWrite explicitamente."; return $result }
+        if (-not $result.SimulationMode -and $Execute -and -not (Invoke-UserActionShouldProcess -Cmdlet $PSCmdlet -Target $SamAccountName -Action "Desabilitar conta de usuário")) { $result.Status = "Cancelled"; $result.Error = "Operação cancelada pelo ShouldProcess."; $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $true; $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"; return $result }
 
         $preview = Get-UserDisablePreview `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
 
         if (-not $preview.Success) {
+            if ($preview.QueryStatus -eq "NotFound") {
+                $result.Status = "NotFound"
+                $result | Add-Member -NotePropertyName QueryStatus -NotePropertyValue "NotFound"
+                return $result
+            }
             $result.Error = $preview.Error
             return $result
         }
@@ -933,7 +1065,11 @@ function Get-UserForcePasswordChangePreview {
         [string]$SamAccountName,
 
         [Parameter(Mandatory)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead
     )
 
     try {
@@ -947,7 +1083,25 @@ function Get-UserForcePasswordChangePreview {
 
         $userResult = Get-UserADInfo `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
+
+        if ($userResult.QueryStatus -eq "NotFound") {
+            return [PSCustomObject]@{
+                Success               = $false
+                Action                = "ForcePasswordChange"
+                SamAccountName        = $SamAccountName
+                SimulationMode        = [bool]$Configuration.SimulationMode
+                UserFound             = $false
+                PasswordChangeAtLogon = $false
+                CanExecute            = $false
+                RequiresConfirm       = $false
+                Preview               = $null
+                Status                = "NotFound"
+                QueryStatus           = "NotFound"
+                Error                 = $null
+            }
+        }
 
         if (-not $userResult.Success) {
             return [PSCustomObject]@{
@@ -1046,7 +1200,7 @@ function Get-UserForcePasswordChangePreview {
 # ============================================================
 
 function Invoke-UserForcePasswordChange {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -1056,7 +1210,13 @@ function Invoke-UserForcePasswordChange {
         [PSCustomObject]$Configuration,
 
         [Parameter()]
-        [switch]$Execute
+        [switch]$Execute,
+
+        [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
+
+        [switch]$AllowRealWrite
     )
 
     $result = [PSCustomObject]@{
@@ -1080,13 +1240,26 @@ function Invoke-UserForcePasswordChange {
             throw "Configuration não pode ser nula."
         }
 
+        if ($null -eq $Configuration.PSObject.Properties['SimulationMode'] -or $Configuration.SimulationMode -isnot [bool]) { throw 'SimulationMode deve ser definido explicitamente como Boolean.' }
         $result.SimulationMode = [bool]$Configuration.SimulationMode
+
+        if ($result.SimulationMode -and ($AllowRealRead -or $AllowRealWrite)) { $result.Error = "Modos conflitantes: SimulationMode não pode ser combinado com autorização real."; return $result }
+        if ($WhatIfPreference) { $result.Success = $true; $result.Status = "Preview"; $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"; $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $false; return $result }
+        if (-not $result.SimulationMode -and -not $AllowRealRead) { $result.Error = "Leitura real bloqueada. Informe -AllowRealRead explicitamente."; return $result }
+        if (-not $result.SimulationMode -and $Execute -and -not $AllowRealWrite) { $result.Error = "Escrita real bloqueada. Informe -AllowRealWrite explicitamente."; return $result }
+        if (-not $result.SimulationMode -and $Execute -and -not (Invoke-UserActionShouldProcess -Cmdlet $PSCmdlet -Target $SamAccountName -Action "Forçar troca de senha")) { $result.Status = "Cancelled"; $result.Error = "Operação cancelada pelo ShouldProcess."; $result | Add-Member -NotePropertyName Cancelled -NotePropertyValue $true; $result | Add-Member -NotePropertyName Mode -NotePropertyValue "Preview"; return $result }
 
         $preview = Get-UserForcePasswordChangePreview `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealRead:$AllowRealRead
 
         if (-not $preview.Success) {
+            if ($preview.QueryStatus -eq "NotFound") {
+                $result.Status = "NotFound"
+                $result | Add-Member -NotePropertyName QueryStatus -NotePropertyValue "NotFound"
+                return $result
+            }
             $result.Error = $preview.Error
             return $result
         }

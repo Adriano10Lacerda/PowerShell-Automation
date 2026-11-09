@@ -2,6 +2,11 @@
 # AD User Provisioning
 # ============================================
 
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+param (
+    [switch]$AllowRealOperation
+)
+
 $ErrorActionPreference = "Stop"
 
 # Caminhos
@@ -30,41 +35,59 @@ $Configuration = Get-Content $ConfigurationPath -Raw | ConvertFrom-Json
 
 Test-ADConfiguration -Configuration $Configuration | Out-Null
 
+if ($Configuration.SimulationMode -isnot [bool]) {
+    throw "Operação bloqueada: 'SimulationMode' deve ser explicitamente booleano."
+}
+
+if ($Configuration.SimulationMode -eq $false -and -not $WhatIfPreference) {
+    Assert-ADRealOperationAuthorization `
+        -Configuration $Configuration `
+        -AllowRealOperation $AllowRealOperation.IsPresent
+}
+
 # ========================================
 # Testar conectividade com Active Directory
 # ========================================
 
-try {
-
-    $ADConnectivity = Test-ADConnectivity `
-        -Configuration $Configuration `
-        -ErrorAction Stop
-
-    if ($ADConnectivity.Simulation) {
-
-        Write-Host ""
-        Write-Host "Conectividade AD: MODO SIMULAÇÃO" -ForegroundColor Yellow
-        Write-Host $ADConnectivity.Message
-        Write-Host ""
-    }
-    else {
-
-        Write-Host ""
-        Write-Host "Conectividade AD: OK" -ForegroundColor Green
-        Write-Host $ADConnectivity.Message
-        Write-Host ""
-    }
+if ($Configuration.SimulationMode -eq $false -and $WhatIfPreference) {
+    Write-Host ""
+    Write-Host "WhatIf: a conectividade com o Active Directory não será consultada."
+    Write-Host ""
 }
-catch {
+else {
+    try {
 
-    Write-Host ""
-    Write-Host "ERRO DE CONECTIVIDADE COM ACTIVE DIRECTORY:" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host ""
-    Write-Host "A operação foi interrompida por segurança." -ForegroundColor Yellow
-    Write-Host ""
+        $ADConnectivity = Test-ADConnectivity `
+            -Configuration $Configuration `
+            -AllowRealOperation:$AllowRealOperation.IsPresent `
+            -ErrorAction Stop
 
-    exit 1
+        if ($ADConnectivity.Simulation) {
+
+            Write-Host ""
+            Write-Host "Conectividade AD: MODO SIMULAÇÃO" -ForegroundColor Yellow
+            Write-Host $ADConnectivity.Message
+            Write-Host ""
+        }
+        else {
+
+            Write-Host ""
+            Write-Host "Conectividade AD: OK" -ForegroundColor Green
+            Write-Host $ADConnectivity.Message
+            Write-Host ""
+        }
+    }
+    catch {
+
+        Write-Host ""
+        Write-Host "ERRO DE CONECTIVIDADE COM ACTIVE DIRECTORY:" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        Write-Host ""
+        Write-Host "A operação foi interrompida por segurança." -ForegroundColor Yellow
+        Write-Host ""
+
+        exit 1
+    }
 }
 
 Write-Host ""
@@ -209,8 +232,14 @@ $DisplayName = "$FirstName $LastName"
 # Verificar disponibilidade do SamAccountName
 # ============================================
 
-Write-Host ""
-Write-Host "Verificando disponibilidade do SamAccountName..." -ForegroundColor Cyan
+if ($Configuration.SimulationMode -eq $false -and $WhatIfPreference) {
+    Write-Host ""
+    Write-Host "WhatIf: disponibilidade do SamAccountName não será consultada."
+}
+else {
+    Write-Host ""
+    Write-Host "Verificando disponibilidade do SamAccountName..." -ForegroundColor Cyan
+}
 
 try {
 
@@ -228,11 +257,16 @@ try {
             -Configuration $Configuration `
             -ExistingSamAccountNames $Configuration.Simulation.ExistingSamAccountNames
     }
+    elseif ($WhatIfPreference) {
+
+        $UniqueSamAccountName = $SamAccountName
+    }
     else {
 
         $UniqueSamAccountName = Get-UniqueADSamAccountName `
             -SamAccountName $SamAccountName `
-            -Configuration $Configuration
+            -Configuration $Configuration `
+            -AllowRealOperation:$AllowRealOperation.IsPresent
     }
 
 }
@@ -251,7 +285,13 @@ catch {
 # Verificar se houve alteração
 # ============================================
 
-if ($UniqueSamAccountName -ne $SamAccountName) {
+if ($Configuration.SimulationMode -eq $false -and $WhatIfPreference) {
+
+    Write-Host ""
+    Write-Host "SamAccountName base: $UniqueSamAccountName" -ForegroundColor Yellow
+    Write-Host "A disponibilidade não foi verificada (WhatIf)." -ForegroundColor Yellow
+}
+elseif ($UniqueSamAccountName -ne $SamAccountName) {
 
     Write-Host ""
     Write-Host "O SamAccountName '$SamAccountName' já está em uso." -ForegroundColor Yellow
@@ -307,10 +347,20 @@ $User = [PSCustomObject]@{
 
 try {
 
-    $ProvisioningResult = New-ADUserProvision `
-        -User $User `
-        -Configuration $Configuration `
-        -ErrorAction Stop
+    $ProvisionParameters = @{
+        User                 = $User
+        Configuration        = $Configuration
+        AllowRealOperation   = $AllowRealOperation.IsPresent
+        ErrorAction          = "Stop"
+    }
+
+    foreach ($CommonParameter in @("WhatIf", "Confirm")) {
+        if ($PSBoundParameters.ContainsKey($CommonParameter)) {
+            $ProvisionParameters[$CommonParameter] = $PSBoundParameters[$CommonParameter]
+        }
+    }
+
+    $ProvisioningResult = New-ADUserProvision @ProvisionParameters
 
     Write-Host ""
     Write-Host "RESULTADO DO PROVISIONAMENTO" -ForegroundColor Cyan

@@ -1,6 +1,14 @@
 #Requires -Version 5.1
 
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Management -ErrorAction Stop
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+$global:PSModuleAutoLoadingPreference = 'None'
+Write-Output 'HARNESS_START:USER_ACCOUNT_ACTIONS_V1'
+
+if (Microsoft.PowerShell.Core\Get-Module -Name ActiveDirectory) {
+    throw "ActiveDirectory já está carregado neste processo; o harness não continuará."
+}
 
 $script:Passed = 0
 $script:Failed = 0
@@ -68,6 +76,81 @@ try {
         $actionsPath `
         -Force `
         -ErrorAction Stop
+
+    $actionsModules = @(Get-Module | Where-Object { $_.Path -eq [System.IO.Path]::GetFullPath($actionsPath) })
+    if ($actionsModules.Count -ne 1) { throw "Esperada uma instância User Actions; encontradas $($actionsModules.Count)." }
+    $actionsModule = $actionsModules[0]
+    $userCoreModule = & $actionsModule { (Get-Command Get-UserADInfo -CommandType Function -ErrorAction Stop).Module }
+    if ($null -eq $userCoreModule -or $userCoreModule.Path -ne [System.IO.Path]::GetFullPath($userCorePath)) {
+        throw "Get-UserADInfo não resolve para a instância esperada do User Core."
+    }
+    if ($null -ne $actionsModule) {
+        & $actionsModule {
+            $script:ExternalCallCounts = @{ GetModule=0; ImportModule=0; Unlock=0; Enable=0; Disable=0; SetUser=0 }
+            $script:ShouldProcessDecision = $true
+            Set-Item Function:\script:Invoke-UserActionShouldProcess { param($Cmdlet,$Target,$Action); return $script:ShouldProcessDecision } -Force
+            Set-Item Function:\script:Get-Module { param([string]$Name,[switch]$ListAvailable); if ($Name -ne 'ActiveDirectory') { throw "Get-Module inesperado bloqueado: $Name" }; $script:ExternalCallCounts.GetModule++; [PSCustomObject]@{Name='ActiveDirectory'} } -Force
+            Set-Item Function:\script:Import-Module { param([string]$Name,[string]$ErrorAction); if ($Name -ne 'ActiveDirectory') { throw "Import-Module inesperado bloqueado: $Name" }; $script:ExternalCallCounts.ImportModule++ } -Force
+            Set-Item Function:\script:Unlock-ADAccount { param([string]$Identity,[string]$Server,[string]$ErrorAction); $script:ExternalCallCounts.Unlock++ } -Force
+            Set-Item Function:\script:Enable-ADAccount { param([string]$Identity,[string]$Server,[string]$ErrorAction); $script:ExternalCallCounts.Enable++ } -Force
+            Set-Item Function:\script:Disable-ADAccount { param([string]$Identity,[string]$Server,[string]$ErrorAction); $script:ExternalCallCounts.Disable++ } -Force
+            Set-Item Function:\script:Set-ADUser { param([string]$Identity,[string]$Server,[bool]$ChangePasswordAtLogon,[string]$ErrorAction); $script:ExternalCallCounts.SetUser++ } -Force
+        }
+    }
+    if ($null -ne $userCoreModule) {
+        & $userCoreModule {
+            $script:ExternalCallCounts = @{ GetModule=0; ImportModule=0; GetADUser=0 }
+            $script:ADFixtureNull = $false
+            Set-Item Function:\script:Get-Module { param([string]$Name,[switch]$ListAvailable); if ($Name -ne 'ActiveDirectory') { throw "Get-Module inesperado bloqueado: $Name" }; $script:ExternalCallCounts.GetModule++; [PSCustomObject]@{Name='ActiveDirectory'} } -Force
+            Set-Item Function:\script:Import-Module { param([string]$Name,[string]$ErrorAction); if ($Name -ne 'ActiveDirectory') { throw "Import-Module inesperado bloqueado: $Name" }; $script:ExternalCallCounts.ImportModule++ } -Force
+            Set-Item Function:\script:Get-ADUser { param([string]$Identity,[string]$Server,[string[]]$Properties,[string]$ErrorAction); $script:ExternalCallCounts.GetADUser++; if ($script:ADFixtureNull) { return $null }; [PSCustomObject]@{SamAccountName='fixture.user';UserPrincipalName='fixture.user@example.invalid';Name='Fixture User';Enabled=$true;LockedOut=$false;MemberOf=@()} } -Force
+        }
+    }
+
+    $actionsStubResolution = & $actionsModule {
+        [PSCustomObject]@{
+            Loader = (Get-Command Import-Module -CommandType Function -ErrorAction SilentlyContinue).CommandType
+            ModuleLookup = (Get-Command Get-Module -CommandType Function -ErrorAction SilentlyContinue).CommandType
+            Mutator = (Get-Command Disable-ADAccount -CommandType Function -ErrorAction SilentlyContinue).CommandType
+            LoaderModule = (Get-Command Import-Module -CommandType Function -ErrorAction SilentlyContinue).Module
+            ModuleLookupModule = (Get-Command Get-Module -CommandType Function -ErrorAction SilentlyContinue).Module
+            MutatorModule = (Get-Command Disable-ADAccount -CommandType Function -ErrorAction SilentlyContinue).Module
+            UnlockModule = (Get-Command Unlock-ADAccount -CommandType Function -ErrorAction SilentlyContinue).Module
+            EnableModule = (Get-Command Enable-ADAccount -CommandType Function -ErrorAction SilentlyContinue).Module
+            SetUserModule = (Get-Command Set-ADUser -CommandType Function -ErrorAction SilentlyContinue).Module
+            LoaderIdentity = (Get-Command Import-Module -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.ImportModule'
+            ModuleLookupIdentity = (Get-Command Get-Module -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.GetModule'
+            MutatorIdentity = (Get-Command Disable-ADAccount -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.Disable'
+            UnlockIdentity = (Get-Command Unlock-ADAccount -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.Unlock'
+            EnableIdentity = (Get-Command Enable-ADAccount -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.Enable'
+            SetUserIdentity = (Get-Command Set-ADUser -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.SetUser'
+        }
+    }
+    $coreStubResolution = & $userCoreModule {
+        [PSCustomObject]@{
+            Loader = (Get-Command Import-Module -CommandType Function -ErrorAction SilentlyContinue).CommandType
+            ModuleLookup = (Get-Command Get-Module -CommandType Function -ErrorAction SilentlyContinue).CommandType
+            ADUser = (Get-Command Get-ADUser -CommandType Function -ErrorAction SilentlyContinue).CommandType
+            LoaderModule = (Get-Command Import-Module -CommandType Function -ErrorAction SilentlyContinue).Module
+            ModuleLookupModule = (Get-Command Get-Module -CommandType Function -ErrorAction SilentlyContinue).Module
+            ADUserModule = (Get-Command Get-ADUser -CommandType Function -ErrorAction SilentlyContinue).Module
+            LoaderIdentity = (Get-Command Import-Module -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.ImportModule'
+            ModuleLookupIdentity = (Get-Command Get-Module -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.GetModule'
+            ADUserIdentity = (Get-Command Get-ADUser -CommandType Function -ErrorAction SilentlyContinue).Definition -match 'ExternalCallCounts.GetADUser'
+        }
+    }
+    if ($actionsStubResolution.Loader -ne 'Function' -or $actionsStubResolution.ModuleLookup -ne 'Function' -or $actionsStubResolution.Mutator -ne 'Function' -or
+        $coreStubResolution.Loader -ne 'Function' -or $coreStubResolution.ModuleLookup -ne 'Function' -or $coreStubResolution.ADUser -ne 'Function' -or
+        $actionsStubResolution.LoaderModule -ne $actionsModule -or $actionsStubResolution.ModuleLookupModule -ne $actionsModule -or
+        $actionsStubResolution.MutatorModule -ne $actionsModule -or $actionsStubResolution.UnlockModule -ne $actionsModule -or
+        $actionsStubResolution.EnableModule -ne $actionsModule -or $actionsStubResolution.SetUserModule -ne $actionsModule -or
+        $coreStubResolution.LoaderModule -ne $userCoreModule -or $coreStubResolution.ModuleLookupModule -ne $userCoreModule -or
+        $coreStubResolution.ADUserModule -ne $userCoreModule -or
+        -not $actionsStubResolution.LoaderIdentity -or -not $actionsStubResolution.ModuleLookupIdentity -or -not $actionsStubResolution.MutatorIdentity -or
+        -not $actionsStubResolution.UnlockIdentity -or -not $actionsStubResolution.EnableIdentity -or -not $actionsStubResolution.SetUserIdentity -or
+        -not $coreStubResolution.LoaderIdentity -or -not $coreStubResolution.ModuleLookupIdentity -or -not $coreStubResolution.ADUserIdentity) {
+        throw "Resolução incompleta dos stubs nos SessionStates de User Actions/Core."
+    }
 
     $moduleImported = $true
 }
@@ -1123,6 +1206,76 @@ Write-TestResult `
     ($configuration.Simulation.ExistingSamAccountNames.Count -eq 3)
 
 # ============================================================
+# ISOLAMENTO FAIL-CLOSED
+# ============================================================
+
+$realFixtureConfiguration = [PSCustomObject]@{}
+foreach ($configurationProperty in $configuration.PSObject.Properties) {
+    $realFixtureConfiguration | Add-Member -NotePropertyName $configurationProperty.Name -NotePropertyValue $configurationProperty.Value
+}
+$realFixtureConfiguration.SimulationMode = $false
+$realFixtureConfiguration.DomainController = 'fixture.invalid'
+$actionCountsBefore = & $actionsModule { @{} + $script:ExternalCallCounts }
+$coreCountsBefore = & $userCoreModule { @{} + $script:ExternalCallCounts }
+Write-TestResult "Caminhos de ações simuladas não chamaram fronteiras" ((($actionCountsBefore.Values | Measure-Object -Sum).Sum -eq 0) -and (($coreCountsBefore.Values | Measure-Object -Sum).Sum -eq 0))
+$actionStubResolution = & $actionsModule { (Get-Command Disable-ADAccount -CommandType Function -ErrorAction SilentlyContinue).CommandType }
+$actionCoreStubResolution = & $userCoreModule { (Get-Command Get-ADUser -CommandType Function -ErrorAction SilentlyContinue).CommandType }
+Write-TestResult "Actions e Core aninhado resolvem stubs em seus módulos" ($actionStubResolution -eq 'Function' -and $actionCoreStubResolution -eq 'Function')
+$blockedWrite = Invoke-UserDisableAccount -SamAccountName 'fixture.user' -Configuration $realFixtureConfiguration -Execute
+$actionCountsAfterBlocked = & $actionsModule { @{} + $script:ExternalCallCounts }
+$coreCountsAfterBlocked = & $userCoreModule { @{} + $script:ExternalCallCounts }
+Write-TestResult "Execute sem autorizações de leitura/escrita falha fechado" (-not $blockedWrite.Success -and $blockedWrite.Error -match 'AllowRealRead')
+Write-TestResult "Execute não autorizado não chama fronteiras" ((($actionCountsBefore.Values | Measure-Object -Sum).Sum -eq ($actionCountsAfterBlocked.Values | Measure-Object -Sum).Sum) -and (($coreCountsBefore.Values | Measure-Object -Sum).Sum -eq ($coreCountsAfterBlocked.Values | Measure-Object -Sum).Sum))
+$readOnlyWrite = Invoke-UserDisableAccount -SamAccountName 'fixture.user' -Configuration $realFixtureConfiguration -Execute -AllowRealRead -Confirm:$false
+$writeOnlyAction = Invoke-UserDisableAccount -SamAccountName 'fixture.user' -Configuration $realFixtureConfiguration -Execute -AllowRealWrite -Confirm:$false
+$countsAfterSplitChecks = & $actionsModule { @{} + $script:ExternalCallCounts }
+Write-TestResult "AllowRealRead não autoriza mutação" (-not $readOnlyWrite.Success -and $readOnlyWrite.Error -match 'AllowRealWrite')
+Write-TestResult "AllowRealWrite não autoriza leitura" (-not $writeOnlyAction.Success -and $writeOnlyAction.Error -match 'AllowRealRead')
+Write-TestResult "Autorizações separadas falham antes das fronteiras" (($countsAfterSplitChecks.Values | Measure-Object -Sum).Sum -eq ($actionCountsAfterBlocked.Values | Measure-Object -Sum).Sum)
+
+$whatIfWrite = Invoke-UserDisableAccount -SamAccountName 'fixture.user' -Configuration $realFixtureConfiguration -Execute -AllowRealRead -AllowRealWrite -WhatIf
+$actionCountsAfterWhatIf = & $actionsModule { @{} + $script:ExternalCallCounts }
+$coreCountsAfterWhatIf = & $userCoreModule { @{} + $script:ExternalCallCounts }
+Write-TestResult "WhatIf não coleta nem altera" ($whatIfWrite.Mode -eq 'Preview' -and $whatIfWrite.Cancelled -eq $false)
+Write-TestResult "WhatIf mantém contadores externos" ((($actionCountsAfterBlocked.Values | Measure-Object -Sum).Sum -eq ($actionCountsAfterWhatIf.Values | Measure-Object -Sum).Sum) -and (($coreCountsAfterBlocked.Values | Measure-Object -Sum).Sum -eq ($coreCountsAfterWhatIf.Values | Measure-Object -Sum).Sum))
+$conflictingWhatIf = Invoke-UserDisableAccount -SamAccountName 'silva.maria.ext' -Configuration $configuration -Execute -AllowRealRead -AllowRealWrite -WhatIf
+$countsAfterConflictingWhatIf = & $actionsModule { @{} + $script:ExternalCallCounts }
+Write-TestResult "Actions rejeita autorizações conflitantes antes de WhatIf" (-not $conflictingWhatIf.Success -and $conflictingWhatIf.Error -match 'conflit' -and (($countsAfterConflictingWhatIf.Values | Measure-Object -Sum).Sum -eq ($actionCountsAfterWhatIf.Values | Measure-Object -Sum).Sum))
+
+& $actionsModule { $script:ShouldProcessDecision = $false }
+$countsBeforeDecline = & $actionsModule { @{} + $script:ExternalCallCounts }
+$declinedWrite = Invoke-UserDisableAccount -SamAccountName 'fixture.user' -Configuration $realFixtureConfiguration -Execute -AllowRealRead -AllowRealWrite -Confirm:$false
+$countsAfterDecline = & $actionsModule { @{} + $script:ExternalCallCounts }
+Write-TestResult "Recusa ShouldProcess é cancelamento determinístico" ($declinedWrite.Status -eq 'Cancelled' -and $declinedWrite.Cancelled -and $declinedWrite.Mode -eq 'Preview')
+Write-TestResult "Recusa ShouldProcess ocorre antes de qualquer consulta" (($countsBeforeDecline.Values | Measure-Object -Sum).Sum -eq ($countsAfterDecline.Values | Measure-Object -Sum).Sum)
+& $actionsModule { $script:ShouldProcessDecision = $true }
+
+$authorizedStubWrite = Invoke-UserDisableAccount -SamAccountName 'fixture.user' -Configuration $realFixtureConfiguration -Execute -AllowRealRead -AllowRealWrite -Confirm:$false
+$authorizedActionCounts = & $actionsModule { @{} + $script:ExternalCallCounts }
+$authorizedCoreCounts = & $userCoreModule { @{} + $script:ExternalCallCounts }
+Write-TestResult "Fluxo autorizado termina em mutador stub" ($authorizedStubWrite.Success -and $authorizedActionCounts.Disable -eq 1)
+Write-TestResult "Fluxo autorizado usa somente stubs contados" ($authorizedActionCounts.GetModule -gt 0 -and $authorizedActionCounts.ImportModule -gt 0 -and $authorizedCoreCounts.GetADUser -gt 0)
+
+& $userCoreModule { $script:ADFixtureNull = $true }
+$notFoundActionPreviews = @(
+    (Get-UserUnlockPreview -SamAccountName 'missing.fixture' -Configuration $realFixtureConfiguration -AllowRealRead),
+    (Get-UserEnablePreview -SamAccountName 'missing.fixture' -Configuration $realFixtureConfiguration -AllowRealRead),
+    (Get-UserDisablePreview -SamAccountName 'missing.fixture' -Configuration $realFixtureConfiguration -AllowRealRead),
+    (Get-UserForcePasswordChangePreview -SamAccountName 'missing.fixture' -Configuration $realFixtureConfiguration -AllowRealRead)
+)
+$notFoundActions = @(
+    (Invoke-UserUnlockAccount -SamAccountName 'missing.fixture' -Configuration $realFixtureConfiguration -Execute -AllowRealRead -AllowRealWrite -Confirm:$false),
+    (Invoke-UserEnableAccount -SamAccountName 'missing.fixture' -Configuration $realFixtureConfiguration -Execute -AllowRealRead -AllowRealWrite -Confirm:$false),
+    (Invoke-UserDisableAccount -SamAccountName 'missing.fixture' -Configuration $realFixtureConfiguration -Execute -AllowRealRead -AllowRealWrite -Confirm:$false),
+    (Invoke-UserForcePasswordChange -SamAccountName 'missing.fixture' -Configuration $realFixtureConfiguration -Execute -AllowRealRead -AllowRealWrite -Confirm:$false)
+)
+& $userCoreModule { $script:ADFixtureNull = $false }
+$notFoundActionCounts = & $actionsModule { @{} + $script:ExternalCallCounts }
+Write-TestResult "As quatro previews preservam NotFound sem Error" (@($notFoundActionPreviews | Where-Object { $_.Status -ne 'NotFound' -or $_.QueryStatus -ne 'NotFound' -or $_.UserFound -ne $false -or $null -ne $_.Error }).Count -eq 0)
+Write-TestResult "As quatro ações preservam NotFound e falham sem alegar sucesso" (@($notFoundActions | Where-Object { $_.Success -or $_.Status -ne 'NotFound' -or $_.QueryStatus -ne 'NotFound' -or $null -ne $_.Error }).Count -eq 0)
+Write-TestResult "NotFound não alcança mutadores" (($notFoundActionCounts.Unlock -eq $authorizedActionCounts.Unlock) -and ($notFoundActionCounts.Enable -eq $authorizedActionCounts.Enable) -and ($notFoundActionCounts.Disable -eq $authorizedActionCounts.Disable) -and ($notFoundActionCounts.SetUser -eq $authorizedActionCounts.SetUser))
+
+# ============================================================
 # RESULTADO
 # ============================================================
 
@@ -1140,6 +1293,7 @@ Write-Host ""
 
 if ($script:Failed -eq 0) {
     Write-Host "USER ACCOUNT ACTIONS: TODOS OS TESTES PASSARAM!" -ForegroundColor Green
+    Write-Output 'HARNESS_PASS:USER_ACCOUNT_ACTIONS_V1'
     exit 0
 }
 else {
