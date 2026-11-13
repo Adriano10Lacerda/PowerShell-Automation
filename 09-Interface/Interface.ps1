@@ -1,3 +1,50 @@
+param([switch]$Demo)
+
+if ($Demo) {
+    # Script-local preference: an input/output error must stop before normal startup.
+    $ErrorActionPreference = 'Stop'
+    $demoPages = @{
+        '1' = 'Password Generator | Senha: [MASCARADA; NAO GERADA]'
+        '2' = 'AD User Provisioning | Usuario ficticio: usuario.demo'
+        '3' = 'Entra ID User Provisioning | UPN ficticio: usuario.demo@example.invalid'
+        '4' = 'Computer Inventory | Host ficticio: DEMO-PC-001 | RAM: 8 GB | BitLocker: FICTICIO'
+        '5' = 'AD Group Management | Grupo ficticio: DEMO-GROUP | Membro: usuario.demo'
+        '6' = 'GPO Management | Politica ficticia: DEMO-POLICY | Vinculos: 0'
+        '7' = 'Reporting | Resumo ficticio: 3 registros | Exportacao desabilitada'
+        '8' = 'Configuration | Exemplo embutido: SimulationMode=true | Nenhum JSON carregado'
+    }
+
+    do {
+        Write-Host ''
+        Write-Host 'POWERSHELL AUTOMATION TOOLKIT | DEMO / SOMENTE VISUALIZACAO'
+        Write-Host 'Dados ficticios. Operacoes reais e exportacoes desabilitadas.'
+        Write-Host '1 - Password Generator'
+        Write-Host '2 - AD User Provisioning'
+        Write-Host '3 - Entra ID User Provisioning'
+        Write-Host '4 - Computer Inventory'
+        Write-Host '5 - AD Group Management'
+        Write-Host '6 - GPO Management'
+        Write-Host '7 - Reporting'
+        Write-Host '8 - Configuration'
+        Write-Host '0 - Exit'
+        $demoOption = Read-Host 'Selecione uma opcao Demo'
+
+        if ($demoOption -eq '0') {
+            Write-Host 'Demo encerrado. Nenhuma operacao real foi executada.'
+        }
+        elseif ($null -ne $demoOption -and $demoPages.ContainsKey($demoOption)) {
+            Write-Host $demoPages[$demoOption]
+            Write-Host 'SOMENTE VISUALIZACAO: nenhuma acao ou exportacao disponivel.'
+            $null = Read-Host 'ENTER para voltar ao menu Demo'
+        }
+        else {
+            Write-Host 'Opcao invalida. Escolha 1-8 ou 0.'
+        }
+    } while ($demoOption -ne '0')
+
+    return
+}
+
 $InterfaceFunctionsPath = Join-Path $PSScriptRoot "Interface-Functions.psm1"
 
 if (-not (Test-Path $InterfaceFunctionsPath)) {

@@ -28,6 +28,7 @@ The interface imports its function module, checks whether the selected script ex
 | `Interface.ps1` | Main script that displays the menu and routes user selections. |
 | `Interface-Functions.psm1` | Functions that locate and launch the individual modules. |
 | `Test-Interface.ps1` | Automated test script for the interface module. |
+| `Test-Interface-Demo.ps1` | Offline Demo checks with controlled input and fail-closed sentinels; not yet run. |
 
 ## Requirements
 
@@ -44,7 +45,36 @@ From the repository root, run:
 .\09-Interface\Interface.ps1
 ```
 
-### Interactive Menu
+### Offline Demo / ViewOnly
+
+Run the launcher as a script with `-Demo` to browse embedded fictional pages:
+
+```powershell
+.\09-Interface\Interface.ps1 -Demo
+```
+
+The Demo branch runs before normal initialization. It does not import project
+modules, inspect files, load JSON, launch auxiliary scripts, query host identity,
+or contact AD, Graph, GPO, CIM, BitLocker, or the network. Options `1`-`8` only
+display static examples; ENTER returns to the menu and `0` returns from the script
+without closing the caller's PowerShell process. No password is generated and
+no administrative action or export is available. Input/output errors terminate
+the Demo without falling back to normal startup.
+
+Omitting `-Demo`, or supplying `-Demo:$false`, retains the existing normal flow.
+Invoke the launcher as a script, not by dot-sourcing it. This is a console Demo,
+not the WPF GUI, and it does not validate any real administrative capability.
+It introduces no PowerShell 7-only syntax; Windows PowerShell 5.1 and PowerShell 7
+functional compatibility still require authorized testing. The V1-wide PowerShell 7
+baseline remains unchanged. For a clean process, use `-NoProfile` when starting
+the chosen PowerShell runtime; no execution-policy bypass is required by this mode.
+
+`Test-Interface-Demo.ps1` is prepared but **NOT RUN**. It reads only the launcher
+source for static checks, then uses in-memory input/output fixtures, command
+sentinels, and normal-startup stubs. It requires no Pester, RSAT, Graph, Git,
+temporary files, or project-module imports. Run it only after separate authorization.
+
+### Normal Interactive Menu
 
 | Option | Module |
 |---|---|
