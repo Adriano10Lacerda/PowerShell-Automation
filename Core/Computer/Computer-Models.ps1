@@ -50,7 +50,11 @@ function New-ComputerInventoryModel {
 
         Network = @()
 
-        BitLocker = @()
+        BitLocker = [PSCustomObject]@{
+            Status  = "NotAvailable"
+            Volumes = @()
+            Error   = $null
+        }
 
         Errors = @()
     }
