@@ -197,6 +197,8 @@ Exemplo:
 |---|---|
 
 | `SimulationMode` | Ativa ou desativa a simulação |
+| `AllowRealCollection` | Autorização explícita por invocação para consultar CIM/BitLocker locais |
+| `AllowRealOperation` | Autorização explícita por invocação para criar relatórios |
 
 | `Inventory` | Define as categorias que serão coletadas |
 
@@ -237,6 +239,20 @@ Quando `SimulationMode` está definido como `true`:
 
 
 Esse modo é indicado para demonstrações, testes e validação inicial.
+
+Para coleta real, `Get-ComputerInventory` exige `-AllowRealCollection` e passa por
+`ShouldProcess` antes de resolver ou chamar os coletores CIM/BitLocker. `-WhatIf`
+ou a recusa de `ShouldProcess` retorna `CollectionStatus = Preview`, sem consultar
+os coletores. A autorização de exportação é independente: `Export-ComputerInventory`
+continua exigindo `-AllowRealOperation` e `ShouldProcess` para gravar.
+
+Os arquivos JSON/CSV são criados exclusivamente dentro de `AllowedRoot`, com
+`CreateNew`; um destino já existente não é sobrescrito. Em falha depois de uma
+gravação parcial, o resultado mantém `Success = false`, lista os arquivos concluídos
+em `Files` e identifica possíveis destinos incompletos em `UncertainFiles`. A
+validação de reparse points reduz riscos de caminho, mas não elimina por completo
+condições TOCTOU contra outro processo com capacidade de alterar simultaneamente
+os diretórios.
 
 
 
@@ -312,7 +328,7 @@ O módulo possui o script:
 
 
 
-Os testes verificam a existência dos arquivos, a validade da configuração, a coleta simulada, os dados fictícios, a exportação JSON e CSV, o uso de caminhos absolutos e o tratamento de diretórios inválidos.
+O código-fonte atual contém 27 casos. Além da existência dos arquivos, configuração, coleta simulada, dados fictícios e exportação JSON/CSV, inclui gates de autorização, stubs fail-closed para CIM/BitLocker, validação de destinos, `CreateNew` e preservação de estado parcial. A suíte foi ampliada depois da evidência histórica abaixo e ainda requer execução funcional confinada.
 
 
 
@@ -324,11 +340,11 @@ Os testes de exportação utilizam dados fictícios e diretórios temporários, 
 
 | Indicador | Resultado |
 |---|---:|
-| Total de testes | 15 |
-| Aprovados | 15 |
-| Falharam | 0 |
+| Total de testes | 15 (evidência histórica) |
+| Aprovados | 15 (evidência histórica) |
+| Falharam | 0 (evidência histórica) |
 
-**Status: aprovado.** Todos os testes automatizados foram concluídos com sucesso.
+Essa execução antecede as alterações atuais. Não representa resultado da suíte atual nem valida os novos cenários. O teste atual verifica `WhatIf` como caminho determinístico sem coleta e sem escrita; uma recusa de `ShouldProcess` independente de `WhatIf` não está coberta. O contrato público não oferece um colaborador de confirmação injetável; `-Confirm` poderia solicitar interação e `-Confirm:$false` aprova a ação. Por isso, não foi fabricado um caso de recusa. Esse cenário permanece bloqueado até haver um ponto de injeção seguro ou um executor determinístico de `ShouldProcess`, seguido de validação funcional confinada.
 
 
 ## Requisitos

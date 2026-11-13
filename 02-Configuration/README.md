@@ -38,6 +38,10 @@ Carrega um arquivo JSON e valida os parâmetros definidos nele.
 | Parâmetro | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
 | `ConfigurationPath` | String | Sim | Caminho do arquivo JSON que será carregado e validado. |
+| `ApprovedRoot` | String | No modo confinado | Raiz local previamente existente e aprovada pelo chamador, independente do conteúdo do JSON. |
+| `ApprovedRootIdentity` | String | No modo confinado | Identidade atual do diretório raiz (volume e ID) usada para detectar substituição durante a validação; não é uma credencial nem atestação. |
+
+As chamadas existentes com apenas `ConfigurationPath` continuam aceitas para caminhos confiáveis. No modo confinado, forneça os dois parâmetros de raiz e um caminho absoluto sob ela. O módulo distingue caminho inseguro, arquivo ausente, falha de leitura, JSON inválido e esquema inválido.
 
 **Exemplo de utilização:**
 
@@ -96,13 +100,17 @@ O script carrega o módulo, valida o arquivo `config.json` e apresenta os parâm
 
 ## Testes automatizados
 
-Para executar a suíte de testes:
+O harness recebe uma raiz exclusiva e vazia, provisionada previamente para a tentativa, e sua identidade registrada por um provisionador confiável. Não há fallback para o temporário do ambiente. Exemplo para uso após autorização e prova da fronteira:
 
 ```powershell
-.\02-Configuration\Test-Configuration.ps1
+.\02-Configuration\Test-Configuration.ps1 -WorkspaceRoot $WorkspaceRoot
 ```
 
-### Resultado da validação da V1
+O harness requer `WorkspaceRoot` explícito, existente, local, vazio e aprovado para a tentativa. Ele não cria diretórios, não altera ACLs e não usa `%TEMP%` como fallback. A validação exige que a raiz e os ancestrais satisfaçam a política de acesso já configurada, além de rejeitar caminhos ambíguos e reparse points. A identidade do diretório é uma verificação de consistência, não autenticação de um provider. Este fluxo destina-se somente a scripts próprios, revisados e autorizados em ambiente administrativo confiável; não é isolamento contra código malicioso executado com o mesmo token, Administrators ou SYSTEM. A validação por caminho e a abertura/leitura posterior ainda têm uma janela TOCTOU contra concorrência hostil. O harness exclui apenas fixtures registradas por esta tentativa, sem recursão, após revalidar identidade e conteúdo; em caso de divergência, preserva os objetos e marca `CLEANUP_INCOMPLETE`. A raiz nunca é excluída.
+
+Chamadores existentes de Get-Configuration com apenas ConfigurationPath continuam no parameter set TrustedPath para preservar compatibilidade. Esse modo pressupõe que o chamador já confia no caminho e não deve ser usado para arquivos não confiáveis. O harness usa o parameter set Confined com a raiz e identidade explícitas.
+
+### Resultado histórico da validação
 
 | Indicador | Resultado |
 |---|---:|
@@ -111,9 +119,15 @@ Para executar a suíte de testes:
 | Testes reprovados | 0 |
 | Taxa de aprovação | 100% |
 
-**Status: todos os testes passaram.**
+Esses números são históricos. A suíte alterada depende de validação futura em ambiente confinado.
 
 A suíte contempla cenários de sucesso e falha, incluindo arquivo inexistente, JSON inválido, campos ausentes, valores inválidos, limites de quantidade, formatos de data e caracteres especiais.
+
+O código atual preserva os 21 cenários da evidência histórica e acrescenta 18 verificações-fonte, para um total esperado de 39: traversal, UNC, dispositivo e ADS testados no helper e na API `Get-Configuration` do parameter set Confined; raiz inexistente e raiz não vazia; identidade divergente; preservação de fixture durante falha de identidade/hash; preservação de arquivo não registrado; ExitCode não zero para falhas de setup/cleanup; compatibilidade TrustedPath; e detecção de reparse point pela API Confined. A validação de reparse tenta criar um link simbólico com nome aleatório somente dentro do WorkspaceRoot validado, aponta-o para a própria raiz e remove apenas o link, sem recursão. Se a criação não for suportada ou autorizada pelo ambiente, o cenário é contado como BLOCKED e o processo termina com código diferente de zero; não há alteração de ACL ou política. Falha na limpeza do link também impede PASS e deixa a execução não-zero.
+
+Os cenários de raiz não vazia e de identidade/hash de cleanup usam fixtures criadas pelo próprio harness no workspace aprovado. O cenário de arquivo não registrado remove temporariamente o registro em memória de uma fixture do harness para demonstrar que a limpeza ignora arquivos sem propriedade registrada; o registro é restaurado para a limpeza final. Nenhum caso autoriza limpeza recursiva ou remoção da raiz.
+
+A contagem esperada da fonte é 39 casos (21 preservados + 18 adicionados), mas isso não constitui resultado de execução. Uma execução futura somente poderá ser considerada aprovada se não houver FAIL ou BLOCKED, setup e cleanup concluírem sem ambiguidade e o ExitCode for zero. O requisito de DACL/identidade de WorkspaceRoot continua dependente de provisionamento prévio válido; o harness não cria nem altera ACLs. Esta suíte não prova isolamento contra concorrência hostil ou processos com o mesmo token, Administrators ou SYSTEM. As verificações por caminho e a remoção do link ainda têm limites TOCTOU sob esse modelo.
 
 ## Observação
 

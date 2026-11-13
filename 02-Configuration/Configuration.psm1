@@ -6,27 +6,95 @@
 
 function Get-Configuration
 {
+    [CmdletBinding(DefaultParameterSetName = 'TrustedPath')]
     param (
-        [Parameter(Mandatory = $true)]
-        [string]$ConfigurationPath
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$ConfigurationPath,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Confined')]
+        [string]$ApprovedRoot,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Confined')]
+        [string]$ApprovedRootIdentity
     )
 
-    # Valida a existencia do arquivo
-    if (-not (Test-Path -LiteralPath $ConfigurationPath -PathType Leaf))
+    if ($PSCmdlet.ParameterSetName -eq 'Confined')
     {
-        throw "Arquivo de configuracao nao encontrado: $ConfigurationPath"
+        try
+        {
+            $workspaceModule = Join-Path (Split-Path -Parent $PSScriptRoot) 'Validation/ConfinedWorkspace.psm1'
+            if (-not [System.IO.File]::Exists($workspaceModule)) {
+                throw [System.IO.FileNotFoundException]::new('Confined workspace validator is unavailable.')
+            }
+            Import-Module -Name $workspaceModule -ErrorAction Stop
+            $literalPath = Resolve-ConfinedWorkspacePath `
+                -Root $ApprovedRoot `
+                -Identity $ApprovedRootIdentity `
+                -Path $ConfigurationPath
+        }
+        catch
+        {
+            $cause = $_.Exception.GetBaseException()
+            $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
+                $cause, 'Configuration.UnsafePath', 'SecurityError', $ConfigurationPath))
+        }
     }
 
-    # Carrega e valida o JSON
     try
     {
-        $Config = Get-Content -LiteralPath $ConfigurationPath -Raw |
-            ConvertFrom-Json -ErrorAction Stop
+        if ($PSCmdlet.ParameterSetName -eq 'Confined')
+        {
+            $stream = [System.IO.File]::Open($literalPath, [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+            try {
+                $reader = [System.IO.StreamReader]::new(
+                    $stream, [System.Text.UTF8Encoding]::new($false, $true), $true, 1024, $true)
+                try { $json = $reader.ReadToEnd() }
+                finally { $reader.Dispose() }
+            }
+            finally { $stream.Dispose() }
+        }
+        else
+        {
+            $json = Get-Content -LiteralPath $ConfigurationPath -Raw -ErrorAction Stop
+        }
     }
     catch
     {
-        throw "O arquivo de configuracao possui formato invalido."
+        $cause = $_.Exception.GetBaseException()
+        if ($cause -is [System.Text.DecoderFallbackException]) {
+            $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
+                [System.FormatException]::new('O arquivo de configuracao nao possui texto UTF-8 valido.', $cause),
+                'Configuration.InvalidJson', 'InvalidData', $ConfigurationPath))
+        }
+        if ($cause -is [System.IO.FileNotFoundException] -or
+            $cause -is [System.IO.DirectoryNotFoundException] -or
+            $cause -is [System.Management.Automation.ItemNotFoundException])
+        {
+            $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
+                [System.IO.FileNotFoundException]::new("Arquivo de configuracao nao encontrado: $ConfigurationPath", $cause),
+                'Configuration.NotFound', 'ObjectNotFound', $ConfigurationPath))
+        }
+        $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
+            [System.IO.IOException]::new("Falha ao ler o arquivo de configuracao: $ConfigurationPath", $cause),
+            'Configuration.ReadFailed', 'ReadError', $ConfigurationPath))
     }
+
+    try
+    {
+        if ([string]::IsNullOrWhiteSpace($json))
+        {
+            throw [System.FormatException]::new('JSON vazio.')
+        }
+        $Config = ConvertFrom-Json -InputObject $json -ErrorAction Stop
+    }
+    catch
+    {
+        $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
+            [System.FormatException]::new('O arquivo de configuracao possui formato invalido.', $_.Exception),
+            'Configuration.InvalidJson', 'InvalidData', $ConfigurationPath))
+    }
+
 
     $Erros = @()
 
@@ -117,7 +185,9 @@ function Get-Configuration
     # Interrompe se houver erros
     if ($Erros.Count -gt 0)
     {
-        throw ($Erros -join " | ")
+        $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new(
+            [System.IO.InvalidDataException]::new(($Erros -join ' | ')),
+            'Configuration.InvalidSchema', 'InvalidData', $ConfigurationPath))
     }
 
     return $Config

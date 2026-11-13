@@ -53,7 +53,7 @@ Keep simulation mode enabled while testing. Review `Reporting-Functions.psm1` to
 
 | Setting | Description |
 |---|---|
-| `SimulationMode` | Must be Boolean. `true` reads enabled sources and previews outputs without writing; `false` writes reports to `Output.Directory`. |
+| `SimulationMode` | Must be Boolean. `true` reads enabled sources only when `-AllowRealRead` is explicitly supplied and previews outputs without writing; `false` requires separate read and write authorization. |
 | `Reporting.IncludeSummary` | Boolean. Includes/removes the summary in JSON and controls the summary CSV. |
 | `Reporting.IncludeDetails` | Boolean. Includes/removes source details in JSON and controls the details CSV. |
 | `Reporting.IncludeTimestamp` | Boolean. Includes/removes report timestamps from exported content. Filenames remain timestamped. |
@@ -72,11 +72,19 @@ In the example configuration, all five sources are disabled by default. Their di
 
 ## Usage
 
-Run the main script from the repository root:
+Run the main script from the repository root. Source enumeration and reading require the explicit `-AllowRealRead` opt-in, including while `SimulationMode` is enabled. `-Preview`/`-WhatIf` return before source enumeration or reading. A real export additionally requires separate `-AllowRealOperation`, `ShouldProcess` confirmation, and an explicit operator-selected local `-AllowedRoot`:
 
 ```powershell
-.\08-Reporting\Reporting.ps1
+.\08-Reporting\Reporting.ps1 -AllowRealRead
 ```
+
+For an actual export, pass both opt-ins and the reviewed local output root:
+
+```powershell
+.\08-Reporting\Reporting.ps1 -AllowRealRead -AllowRealOperation -AllowedRoot 'C:\Reports'
+```
+
+Exports use unique names and exclusive file creation; existing output files are never overwritten. If a later format fails after an earlier file was created, the result reports failure and preserves the partial artifacts for review.
 
 ### Interactive Menu
 
@@ -104,17 +112,21 @@ The test script creates its own dummy CSV/JSON input files and temporary output
 directories. It does not read the local `Reporting-Configuration.json` or
 existing report files. The temporary test workspace is removed in `finally`.
 
-The latest isolated run completed 27/27 checks with exit code 0 on PowerShell
-7.6.9. This does not constitute a test against live source data.
+Historical evidence: an earlier isolated run completed 27/27 checks with exit
+code 0 on PowerShell 7.6.9. That result predates the explicit read opt-in and
+exclusive output creation changes. The current 33-check suite has not been
+executed after those changes; do not treat the historical result as current
+validation or as a test against live source data.
 
 ## Security and Operational Notes
 
 - Keep local configuration files out of version control when they contain environment-specific settings.
 - Never commit passwords, access tokens, or other secrets.
 - Verify source directories and file patterns before execution.
-- Confirm that the output directory is appropriate and writable.
-- Review simulation mode and enabled sources before processing.
-- Simulation mode suppresses output writes; enabled source files are still read.
+- Review enabled sources before passing `-AllowRealRead`.
+- Pass `-AllowRealOperation` separately for export and use `ShouldProcess` confirmation.
+- Select an existing local `-AllowedRoot`; real exports require it explicitly.
+- Simulation mode suppresses output writes; enabled source files are still read when `-AllowRealRead` is supplied.
 - Validate generated reports before relying on them for operational decisions.
 
 An exported result is unsuccessful if any source file could not be parsed, even

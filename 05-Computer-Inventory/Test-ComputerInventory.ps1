@@ -17,6 +17,7 @@ if (Microsoft.PowerShell.Core\Get-Module -Name ActiveDirectory) {
 
 $ModulePath = Join-Path $PSScriptRoot "Inventory-Functions.psm1"
 $ConfigPath = Join-Path $PSScriptRoot "Inventory-Configuration.example.json"
+$EntryPointPath = Join-Path $PSScriptRoot "Computer-Inventory.ps1"
 
 function Assert-InventoryProjectFile {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -60,6 +61,7 @@ function Assert-InventoryProjectFile {
 
 $ModulePath = Assert-InventoryProjectFile -Path $ModulePath
 $ConfigPath = Assert-InventoryProjectFile -Path $ConfigPath
+$EntryPointPath = Assert-InventoryProjectFile -Path $EntryPointPath
 
 $TotalTests = 0
 $PassedTests = 0
@@ -420,11 +422,62 @@ Invoke-Test -Name "Coleta real exige autorização explícita" -Test {
             Out-Null
     }
     catch {
-        $rejected = $_.Exception.Message -match "AllowRealOperation"
+        $rejected = $_.Exception.Message -match "AllowRealCollection"
     }
 
     if (-not $rejected) {
-        throw "A coleta real deveria ser bloqueada sem -AllowRealOperation."
+        throw "A coleta real deveria ser bloqueada sem -AllowRealCollection."
+    }
+}
+
+Invoke-Test -Name "WhatIf e recusa ShouldProcess bloqueiam coletores" -Test {
+    $realConfig = $config | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $realConfig.SimulationMode = $false
+    $before = $inventoryModule.SessionState.InvokeCommand.InvokeScript(
+        $true, { @{} + $script:ExternalCallCounts }, $null, @()
+    )
+
+    $whatIfResult = Get-ComputerInventory `
+        -Configuration $realConfig `
+        -AllowRealCollection `
+        -WhatIf
+
+    if ($whatIfResult.CollectionStatus -ne 'Preview' -or
+        $whatIfResult.SimulationMode -ne $false) {
+        throw "WhatIf deveria retornar Preview sem simular dados reais."
+    }
+
+    $withoutAuthorization = Get-ComputerInventory `
+        -Configuration $realConfig `
+        -WhatIf
+    if ($withoutAuthorization.CollectionStatus -ne 'Preview') {
+        throw "WhatIf sem autorização deveria encerrar em Preview."
+    }
+
+    $after = $inventoryModule.SessionState.InvokeCommand.InvokeScript(
+        $true, { @{} + $script:ExternalCallCounts }, $null, @()
+    )
+    foreach ($name in @('GetCimInstance', 'GetBitLockerVolume', 'GetCommand', 'GetModule', 'ImportModule')) {
+        if ($after[$name] -ne $before[$name]) {
+            throw "WhatIf/recusa alcançou a fronteira de coleta $name."
+        }
+    }
+}
+
+Invoke-Test -Name "Entrypoint propaga WhatIf e encerra antes da exportação" -Test {
+    $entrypointText = Microsoft.PowerShell.Management\Get-Content `
+        -LiteralPath $EntryPointPath `
+        -Raw `
+        -ErrorAction Stop
+    $collectionIndex = $entrypointText.IndexOf('Get-ComputerInventory', [System.StringComparison]::Ordinal)
+    $previewIndex = $entrypointText.IndexOf("if (`$Inventory.CollectionStatus -eq 'Preview')", [System.StringComparison]::Ordinal)
+    $exportIndex = $entrypointText.IndexOf('Export-ComputerInventory', [System.StringComparison]::Ordinal)
+
+    if ($collectionIndex -lt 0 -or $previewIndex -le $collectionIndex -or $exportIndex -le $previewIndex -or
+        $entrypointText -notmatch '-AllowRealCollection:\$AllowRealCollection' -or
+        $entrypointText -notmatch '-WhatIf:\$WhatIfPreference' -or
+        $entrypointText -match '(?im)^\s*Read-Host\b') {
+        throw 'Entrypoint deve encaminhar o gate de coleta, interromper Preview antes da exportação e não solicitar entrada interativa.'
     }
 }
 
@@ -546,7 +599,7 @@ $inventoryCountersBeforeAuthorizedFixture = $inventoryModule.SessionState.Invoke
 Invoke-Test -Name "Coleta autorizada usa somente fixtures CIM e BitLocker" -Test {
     $fixtureConfig = $config | ConvertTo-Json -Depth 20 | ConvertFrom-Json
     $fixtureConfig.SimulationMode = $false
-    $fixtureInventory = Get-ComputerInventory -Configuration $fixtureConfig -AllowRealOperation
+    $fixtureInventory = Get-ComputerInventory -Configuration $fixtureConfig -AllowRealCollection
 
     if ($fixtureInventory.ComputerSystem.ComputerName -ne 'FIXTURE-PC' -or
         $fixtureInventory.OperatingSystem.OperatingSystem -ne 'Fixture OS' -or
@@ -625,8 +678,7 @@ try {
         $inventoryModule.SessionState.InvokeCommand.InvokeScript($true, {
             $script:ExportMutationCounters = @{
                 NewItem = 0
-                SetContent = 0
-                ExportCsv = 0
+                CreateNew = 0
             }
 
             Set-Item Function:\script:Get-Item -Value {
@@ -656,22 +708,14 @@ try {
                 throw "New-Item inesperado bloqueado: $Path"
             } -Force
 
-            Set-Item Function:\script:Set-Content -Value {
-                # V1-HARNESS:EXPORT-SET-CONTENT-FAIL-CLOSED
+            Set-Item Function:\script:Write-ComputerInventoryFileCreateNew -Value {
+                # V1-HARNESS:EXPORT-CREATE-NEW-FAIL-CLOSED
                 [CmdletBinding()]
-                param([string]$Path, [string]$LiteralPath, [string]$Encoding, [string]$ErrorAction)
-                $script:ExportMutationCounters.SetContent++
-                throw "Set-Content inesperado bloqueado: $Path"
+                param([string]$Path, [byte[]]$Bytes)
+                $script:ExportMutationCounters.CreateNew++
+                throw "CreateNew inesperado bloqueado: $Path"
             } -Force
-
-            Set-Item Function:\script:Export-Csv -Value {
-                # V1-HARNESS:EXPORT-CSV-FAIL-CLOSED
-                [CmdletBinding()]
-                param([string]$Path, [string]$LiteralPath, [switch]$NoTypeInformation, [string]$Encoding, [string]$ErrorAction)
-                $script:ExportMutationCounters.ExportCsv++
-                throw "Export-Csv inesperado bloqueado: $Path"
-            } -Force
-            $Names = @('Get-Item', 'Test-Path', 'New-Item', 'Set-Content', 'Export-Csv')
+            $Names = @('Get-Item', 'Test-Path', 'New-Item', 'Write-ComputerInventoryFileCreateNew')
             $Gate = foreach ($Name in $Names) {
                 $First = Microsoft.PowerShell.Core\Get-Command $Name -CommandType Function -ErrorAction Stop
                 $Second = Microsoft.PowerShell.Core\Get-Command $Name -CommandType Function -ErrorAction Stop
@@ -688,8 +732,7 @@ try {
                 throw 'Gate de stubs de filesystem não foi comprovado no SessionState efetivo.'
             }
             if ($script:ExportMutationCounters.NewItem -ne 0 -or
-                $script:ExportMutationCounters.SetContent -ne 0 -or
-                $script:ExportMutationCounters.ExportCsv -ne 0) {
+                $script:ExportMutationCounters.CreateNew -ne 0) {
                 throw 'Uma mutação de arquivo ocorreu durante a instalação dos stubs.'
             }
         }, $null, @()) | Out-Null
@@ -716,13 +759,13 @@ try {
             if ($result.Success -ne $false -or $result.Message -notmatch 'segmento de nome de arquivo') {
                 throw "ComputerName malicioso não foi rejeitado: $($result.Message)"
             }
-            if ($writeCounts.NewItem -ne 0 -or $writeCounts.SetContent -ne 0 -or $writeCounts.ExportCsv -ne 0) {
+            if ($writeCounts.NewItem -ne 0 -or $writeCounts.CreateNew -ne 0) {
                 throw "Houve tentativa de escrita antes da rejeição: $($writeCounts | ConvertTo-Json -Compress)"
             }
         }
         finally {
             $inventoryModule.SessionState.InvokeCommand.InvokeScript($true, {
-                foreach ($name in @('Get-Item', 'Test-Path', 'New-Item', 'Set-Content', 'Export-Csv')) {
+                foreach ($name in @('Get-Item', 'Test-Path', 'New-Item', 'Write-ComputerInventoryFileCreateNew')) {
                     Microsoft.PowerShell.Management\Remove-Item `
                         -LiteralPath ("Function:\script:" + $name) `
                         -ErrorAction SilentlyContinue
@@ -873,6 +916,79 @@ try {
 
         if ($rows[0].ComputerName -ne "SIMULATED-PC") {
             throw "O CSV não contém o computador fictício esperado."
+        }
+    }
+
+    Invoke-Test -Name "CreateNew preserva destino preexistente" -Test {
+        $exclusivePath = Join-Path $testRoot ("CreateNew-" + [guid]::NewGuid().ToString('N') + '.bin')
+        $exclusiveBytes = [System.Text.Encoding]::UTF8.GetBytes('conteudo-original')
+        $inventoryModule.SessionState.InvokeCommand.InvokeScript(
+            $true,
+            { param($Path, $Bytes) Write-ComputerInventoryFileCreateNew -Path $Path -Bytes $Bytes },
+            $null,
+            @($exclusivePath, $exclusiveBytes)
+        ) | Out-Null
+
+        $collisionRejected = $false
+        try {
+            $inventoryModule.SessionState.InvokeCommand.InvokeScript(
+                $true,
+                { param($Path, $Bytes) Write-ComputerInventoryFileCreateNew -Path $Path -Bytes $Bytes },
+                $null,
+                @($exclusivePath, [System.Text.Encoding]::UTF8.GetBytes('conteudo-substituto'))
+            ) | Out-Null
+        }
+        catch [System.IO.IOException] {
+            $collisionRejected = $true
+        }
+
+        $afterBytes = [System.IO.File]::ReadAllBytes($exclusivePath)
+        if (-not $collisionRejected -or
+            [System.Text.Encoding]::UTF8.GetString($afterBytes) -ne 'conteudo-original') {
+            throw 'CreateNew deveria rejeitar a colisão sem substituir o arquivo existente.'
+        }
+    }
+
+    Invoke-Test -Name "Falha parcial de exportação preserva arquivos concluídos e alvo incerto" -Test {
+        $partialConfig = $configExport | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $partialConfig.SimulationMode = $false
+        $partialConfig.Output.Directory = Join-Path $testRoot ("Partial-" + [guid]::NewGuid().ToString('N'))
+        $partialConfig.Output.Formats = @('JSON', 'CSV')
+        $partialCounts = [hashtable]::Synchronized(@{ Calls = 0 })
+
+        $inventoryModule.SessionState.InvokeCommand.InvokeScript($true, {
+            param($Counters)
+            Set-Item Function:\script:Write-ComputerInventoryFileCreateNew -Value ({
+                # V1-HARNESS:EXPORT-PARTIAL-WRITER
+                param([string]$Path, [byte[]]$Bytes)
+                $Counters.Calls++
+                if ($Counters.Calls -eq 2) {
+                    throw [System.IO.IOException]::new('Falha sintética na segunda gravação.')
+                }
+            }.GetNewClosure()) -Force
+        }, $null, @($partialCounts)) | Out-Null
+
+        try {
+            $partialResult = Export-ComputerInventory `
+                -Inventory $inventoryExport `
+                -Configuration $partialConfig `
+                -AllowedRoot $testRoot `
+                -AllowRealOperation `
+                -Confirm:$false
+
+            if ($partialResult.Success -ne $false -or
+                $partialResult.Partial -ne $true -or
+                @($partialResult.Files).Count -ne 1 -or
+                @($partialResult.UncertainFiles).Count -ne 1) {
+                throw 'A falha parcial deve preservar o primeiro resultado e identificar o destino incerto.'
+            }
+        }
+        finally {
+            $inventoryModule.SessionState.InvokeCommand.InvokeScript($true, {
+                Microsoft.PowerShell.Management\Remove-Item `
+                    -LiteralPath 'Function:\script:Write-ComputerInventoryFileCreateNew' `
+                    -ErrorAction SilentlyContinue
+            }, $null, @()) | Out-Null
         }
     }
 

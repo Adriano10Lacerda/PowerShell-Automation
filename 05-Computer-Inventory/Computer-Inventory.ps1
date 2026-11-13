@@ -6,6 +6,8 @@
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
 param(
+    [switch]$AllowRealCollection,
+
     [switch]$AllowRealOperation
 )
 
@@ -100,7 +102,9 @@ try {
 
     $Inventory = Get-ComputerInventory `
         -Configuration $Configuration `
-        -AllowRealOperation:$AllowRealOperation `
+        -AllowRealCollection:$AllowRealCollection `
+        -WhatIf:$WhatIfPreference `
+        -Confirm:$Confirm `
         -ErrorAction Stop
 }
 catch {
@@ -110,6 +114,11 @@ catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
     Write-Host ""
     exit 1
+}
+
+if ($Inventory.CollectionStatus -eq 'Preview') {
+    Write-Host 'A coleta foi recusada; nenhum dado CIM/BitLocker foi consultado e nenhum relatório será gravado.' -ForegroundColor Yellow
+    exit 0
 }
 
 # ============================================

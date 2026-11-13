@@ -2,8 +2,13 @@
 param (
     [switch]$AllowRealOperation,
 
-    [string]$AllowedRoot = $PSScriptRoot
+    [switch]$AllowRealRead,
+
+    [string]$AllowedRoot
 )
+
+$script:AllowRealRead = $AllowRealRead
+$script:AllowedRootWasBound = $PSBoundParameters.ContainsKey('AllowedRoot')
 
 $ErrorActionPreference = "Stop"
 
@@ -113,8 +118,19 @@ function Show-Summary {
     Write-Host "Gerando resumo..." -ForegroundColor Yellow
     Write-Host ""
 
+    if ($WhatIfPreference) {
+        Write-Host "Preview: nenhum arquivo de origem será enumerado ou lido." -ForegroundColor Yellow
+        return
+    }
+
+    if (-not $AllowRealRead) {
+        Write-Host "Leitura real bloqueada. Reinicie com -AllowRealRead após revisar as fontes habilitadas." -ForegroundColor Yellow
+        return
+    }
+
     $Dataset = New-ReportingDataset `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead
 
     Write-Host "Resumo do Reporting:" -ForegroundColor Cyan
     Write-Host ""
@@ -133,7 +149,11 @@ function Invoke-Report {
     $ReportingParameters = @{
         Configuration      = $Configuration
         AllowRealOperation = $AllowRealOperation
-        AllowedRoot        = $AllowedRoot
+        AllowRealRead      = $AllowRealRead
+    }
+
+    if ($script:AllowedRootWasBound) {
+        $ReportingParameters.AllowedRoot = $AllowedRoot
     }
 
     if ($WhatIfPreference) {
@@ -262,6 +282,11 @@ switch ($Option) {
 
     "4" {
 
+        if ($WhatIfPreference) {
+            Write-Host "Preview: nenhum arquivo de origem será enumerado ou lido." -ForegroundColor Yellow
+            return
+        }
+
         Write-Host ""
         Write-Host "Arquivos de origem:" -ForegroundColor Cyan
         Write-Host ""
@@ -278,8 +303,14 @@ switch ($Option) {
 
             Write-Host "[$SourceName]" -ForegroundColor Yellow
 
+            if (-not $AllowRealRead) {
+                Write-Host "Leitura real bloqueada. Reinicie com -AllowRealRead após revisar as fontes habilitadas." -ForegroundColor Yellow
+                return
+            }
+
             $Files = @(Get-ReportingSourceFiles `
-                -Source $Source)
+                -Source $Source `
+                -AllowRealRead:$AllowRealRead)
 
             if ($Files.Count -eq 0) {
 

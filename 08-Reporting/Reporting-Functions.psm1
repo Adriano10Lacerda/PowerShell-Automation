@@ -191,6 +191,32 @@ function Assert-ReportingPathLexicallySafe {
 }
 
 
+function Assert-ReportingReadAuthorization {
+
+    [CmdletBinding()]
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Operation,
+
+        [switch]$AllowRealRead
+    )
+
+    if (-not $AllowRealRead) {
+        $Exception = [System.UnauthorizedAccessException]::new(
+            "Leitura real bloqueada em '$Operation'. Informe -AllowRealRead explicitamente."
+        )
+        $ErrorRecord = [System.Management.Automation.ErrorRecord]::new(
+            $Exception,
+            'Reporting.ReadAuthorizationRequired',
+            [System.Management.Automation.ErrorCategory]::SecurityError,
+            $Operation
+        )
+        $PSCmdlet.ThrowTerminatingError($ErrorRecord)
+    }
+}
+
+
 function Resolve-ReportingOutputPathLexically {
 
     param (
@@ -352,10 +378,20 @@ function Assert-ReportingOutputDirectoryStillSafe {
 
 function Get-ReportingSourceFiles {
 
+    [CmdletBinding()]
+
     param (
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Source
+        [PSCustomObject]$Source,
+
+        [switch]$AllowRealRead
     )
+
+    if ($WhatIfPreference) {
+        return @()
+    }
+
+    Assert-ReportingReadAuthorization -Operation 'Get-ReportingSourceFiles' -AllowRealRead:$AllowRealRead
 
     $InputDirectory = Resolve-ReportingPath `
         -Path $Source.Directory
@@ -396,13 +432,32 @@ function Get-ReportingSourceFiles {
 
 function Get-ReportingData {
 
+    [CmdletBinding()]
+
     param (
         [Parameter(Mandatory = $true)]
         [System.IO.FileInfo]$File,
 
         [Parameter(Mandatory = $false)]
-        [string]$SourceName = "Unknown"
+        [string]$SourceName = "Unknown",
+
+        [switch]$AllowRealRead
     )
+
+    if ($WhatIfPreference) {
+        return [PSCustomObject]@{
+            SourceName = $SourceName
+            FileName   = $File.Name
+            FullPath   = $File.FullName
+            Format     = $File.Extension.ToUpper().TrimStart('.')
+            Data       = $null
+            Success    = $false
+            Mode       = 'Preview'
+            Message    = 'WhatIf ativo. Nenhum arquivo foi lido.'
+        }
+    }
+
+    Assert-ReportingReadAuthorization -Operation 'Get-ReportingData' -AllowRealRead:$AllowRealRead
 
     try {
 
@@ -411,7 +466,7 @@ function Get-ReportingData {
             ".json" {
 
                 $Content = Get-Content `
-                    -Path $File.FullName `
+                    -LiteralPath $File.FullName `
                     -Raw `
                     -ErrorAction Stop
 
@@ -425,7 +480,7 @@ function Get-ReportingData {
                     FileName   = $File.Name
                     FullPath   = $File.FullName
                     Format     = "JSON"
-                    Data       = ($Content | ConvertFrom-Json)
+                    Data       = ($Content | ConvertFrom-Json -ErrorAction Stop)
                     Success    = $true
                     Message    = "Arquivo JSON carregado com sucesso."
                 }
@@ -434,7 +489,7 @@ function Get-ReportingData {
             ".csv" {
 
                 $Data = Import-Csv `
-                    -Path $File.FullName `
+                    -LiteralPath $File.FullName `
                     -ErrorAction Stop
 
                 return [PSCustomObject]@{
@@ -560,10 +615,28 @@ function New-ReportingExportPayload {
 
 function New-ReportingDataset {
 
+    [CmdletBinding()]
+
     param (
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Configuration
+        [PSCustomObject]$Configuration,
+
+        [switch]$AllowRealRead
     )
+
+    if ($WhatIfPreference) {
+        $EmptySummary = Get-ReportingSummary -Data @()
+        return [PSCustomObject]@{
+            GeneratedAt = $EmptySummary.GeneratedAt
+            Summary     = $EmptySummary
+            Files       = @()
+            Success     = $false
+            Mode        = 'Preview'
+            Message     = 'WhatIf ativo. Nenhuma fonte foi enumerada ou lida.'
+        }
+    }
+
+    Assert-ReportingReadAuthorization -Operation 'New-ReportingDataset' -AllowRealRead:$AllowRealRead
 
     Test-ReportingConfiguration `
         -Configuration $Configuration |
@@ -584,13 +657,15 @@ function New-ReportingDataset {
         }
 
         $Files = Get-ReportingSourceFiles `
-            -Source $Source
+            -Source $Source `
+            -AllowRealRead:$AllowRealRead
 
         foreach ($File in $Files) {
 
             $Result = Get-ReportingData `
                 -File $File `
-                -SourceName $SourceName
+                -SourceName $SourceName `
+                -AllowRealRead:$AllowRealRead
 
             $LoadedData += $Result
         }
@@ -603,6 +678,39 @@ function New-ReportingDataset {
         GeneratedAt     = Get-Date
         Summary         = $Summary
         Files           = $LoadedData
+    }
+}
+
+
+function Write-ReportingTextCreateNew {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Content,
+
+        [Parameter(Mandatory = $true)]
+        [System.Collections.Generic.List[string]]$CreatedFiles
+    )
+
+    $Encoding = [System.Text.UTF8Encoding]::new($false)
+    $Bytes = $Encoding.GetBytes($Content)
+    $Stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None
+    )
+    $CreatedFiles.Add($Path)
+    try {
+        $Stream.Write($Bytes, 0, $Bytes.Length)
+        $Stream.Flush($true)
+    }
+    finally {
+        $Stream.Dispose()
     }
 }
 
@@ -660,7 +768,8 @@ foreach ($Format in $Formats) {
     }
 
     $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    $ExportedFiles = @()
+    $RunSuffix = [guid]::NewGuid().ToString('N')
+    $ExportedFiles = [System.Collections.Generic.List[string]]::new()
     $ExpectedFiles = @()
 
     foreach ($Format in $Formats) {
@@ -668,20 +777,20 @@ foreach ($Format in $Formats) {
             "JSON" {
                 $ExpectedFiles += Join-Path `
                     -Path $ConfiguredOutputDirectory `
-                    -ChildPath "Reporting-$Timestamp.json"
+                    -ChildPath "Reporting-$Timestamp-$RunSuffix.json"
             }
 
             "CSV" {
                 if ($Configuration.Reporting.IncludeSummary) {
                     $ExpectedFiles += Join-Path `
                         -Path $ConfiguredOutputDirectory `
-                        -ChildPath "Reporting-Summary-$Timestamp.csv"
+                        -ChildPath "Reporting-Summary-$Timestamp-$RunSuffix.csv"
                 }
 
                 if ($Configuration.Reporting.IncludeDetails -and @($Dataset.Files).Count -gt 0) {
                     $ExpectedFiles += Join-Path `
                         -Path $ConfiguredOutputDirectory `
-                        -ChildPath "Reporting-Details-$Timestamp.csv"
+                        -ChildPath "Reporting-Details-$Timestamp-$RunSuffix.csv"
                 }
             }
         }
@@ -717,6 +826,10 @@ foreach ($Format in $Formats) {
         throw "Exportação real bloqueada. Informe -AllowRealOperation explicitamente."
     }
 
+    if (-not $PSBoundParameters.ContainsKey('AllowedRoot')) {
+        throw "Exportação real bloqueada. Informe uma raiz local explícita em -AllowedRoot."
+    }
+
     $OutputDirectory = Resolve-ReportingOutputPath `
         -Path $Configuration.Output.Directory `
         -AllowedRoot $AllowedRoot
@@ -738,11 +851,11 @@ foreach ($Format in $Formats) {
         }
     }
 
+    try {
     if (-not (Test-Path -LiteralPath $OutputDirectory)) {
         New-Item `
             -ItemType Directory `
             -Path $OutputDirectory `
-            -Force `
             -ErrorAction Stop |
             Out-Null
     }
@@ -757,7 +870,7 @@ foreach ($Format in $Formats) {
             "JSON" {
                 $FilePath = Join-Path `
                     -Path $OutputDirectory `
-                    -ChildPath "Reporting-$Timestamp.json"
+                    -ChildPath "Reporting-$Timestamp-$RunSuffix.json"
 
                 $null = Assert-ReportingOutputDirectoryStillSafe `
                     -Path $Configuration.Output.Directory `
@@ -765,23 +878,22 @@ foreach ($Format in $Formats) {
                     -ExpectedOutputDirectory $OutputDirectory
                 Assert-ReportingFileTargetSafe -Path $FilePath
 
-                (New-ReportingExportPayload `
+                $JsonContent = (New-ReportingExportPayload `
                     -Dataset $Dataset `
                     -Configuration $Configuration) |
-                    ConvertTo-Json -Depth 10 |
-                    Set-Content `
-                        -LiteralPath $FilePath `
-                        -Encoding UTF8 `
-                        -ErrorAction Stop
+                    ConvertTo-Json -Depth 10 -ErrorAction Stop
 
-                $ExportedFiles += $FilePath
+                Write-ReportingTextCreateNew `
+                    -Path $FilePath `
+                    -Content ($JsonContent + [Environment]::NewLine) `
+                    -CreatedFiles $ExportedFiles
             }
 
             "CSV" {
                 if ($Configuration.Reporting.IncludeSummary) {
                     $FilePath = Join-Path `
                         -Path $OutputDirectory `
-                        -ChildPath "Reporting-Summary-$Timestamp.csv"
+                        -ChildPath "Reporting-Summary-$Timestamp-$RunSuffix.csv"
 
                     $null = Assert-ReportingOutputDirectoryStillSafe `
                         -Path $Configuration.Output.Directory `
@@ -793,20 +905,17 @@ foreach ($Format in $Formats) {
                         -Dataset $Dataset `
                         -Configuration $Configuration).Summary
 
-                    $SummaryPayload |
-                        Export-Csv `
-                            -LiteralPath $FilePath `
-                            -NoTypeInformation `
-                            -Encoding UTF8 `
-                            -ErrorAction Stop
-
-                    $ExportedFiles += $FilePath
+                    $SummaryCsv = @($SummaryPayload | ConvertTo-Csv -NoTypeInformation -ErrorAction Stop)
+                    Write-ReportingTextCreateNew `
+                        -Path $FilePath `
+                        -Content (([string]::Join([Environment]::NewLine, [string[]]$SummaryCsv)) + [Environment]::NewLine) `
+                        -CreatedFiles $ExportedFiles
                 }
 
                 if ($Configuration.Reporting.IncludeDetails -and @($Dataset.Files).Count -gt 0) {
                     $FilePath = Join-Path `
                         -Path $OutputDirectory `
-                        -ChildPath "Reporting-Details-$Timestamp.csv"
+                        -ChildPath "Reporting-Details-$Timestamp-$RunSuffix.csv"
 
                     $null = Assert-ReportingOutputDirectoryStillSafe `
                         -Path $Configuration.Output.Directory `
@@ -836,15 +945,32 @@ foreach ($Format in $Formats) {
                         [PSCustomObject]$DetailRow
                     }
 
-                    $DetailRows |
-                        Export-Csv `
-                            -LiteralPath $FilePath `
-                            -NoTypeInformation `
-                            -Encoding UTF8 `
-                            -ErrorAction Stop
-
-                    $ExportedFiles += $FilePath
+                    $DetailCsv = @($DetailRows | ConvertTo-Csv -NoTypeInformation -ErrorAction Stop)
+                    Write-ReportingTextCreateNew `
+                        -Path $FilePath `
+                        -Content (([string]::Join([Environment]::NewLine, [string[]]$DetailCsv)) + [Environment]::NewLine) `
+                        -CreatedFiles $ExportedFiles
                 }
+            }
+        }
+    }
+
+    }
+    catch {
+        $Created = @($ExportedFiles.ToArray())
+        return [PSCustomObject]@{
+            Success         = $false
+            SimulationMode  = $false
+            Mode            = if ($Created.Count -gt 0) { "Partial" } else { "Failed" }
+            IsSimulated     = $false
+            Cancelled       = $false
+            OutputDirectory = $OutputDirectory
+            Files           = $Created
+            Message         = if ($Created.Count -gt 0) {
+                "A exportação falhou após criar $($Created.Count) arquivo(s); os artefatos parciais foram preservados. Detalhes: $($_.Exception.Message)"
+            }
+            else {
+                "A exportação falhou antes de criar arquivos. Detalhes: $($_.Exception.Message)"
             }
         }
     }
@@ -856,7 +982,7 @@ foreach ($Format in $Formats) {
         IsSimulated     = $false
         Cancelled       = $false
         OutputDirectory = $OutputDirectory
-        Files           = $ExportedFiles
+        Files           = @($ExportedFiles.ToArray())
         Message         = "Relatórios exportados com sucesso."
     }
 }
@@ -868,6 +994,8 @@ function Invoke-Reporting {
         [PSCustomObject]$Configuration,
 
         [switch]$AllowRealOperation,
+
+        [switch]$AllowRealRead,
 
         [switch]$Preview,
 
@@ -897,9 +1025,15 @@ function Invoke-Reporting {
         }
     }
 
+    Assert-ReportingReadAuthorization -Operation 'Invoke-Reporting' -AllowRealRead:$AllowRealRead
+
     if ($Configuration.SimulationMode -eq $false) {
         if (-not $AllowRealOperation) {
             throw "Exportação real bloqueada. Informe -AllowRealOperation explicitamente."
+        }
+
+        if (-not $PSBoundParameters.ContainsKey('AllowedRoot')) {
+            throw "Exportação real bloqueada. Informe uma raiz local explícita em -AllowedRoot."
         }
 
         $OutputDirectory = Resolve-ReportingOutputPath `
@@ -923,7 +1057,8 @@ function Invoke-Reporting {
     }
 
     $Dataset = New-ReportingDataset `
-        -Configuration $Configuration
+        -Configuration $Configuration `
+        -AllowRealRead:$AllowRealRead
 
     $Export = Export-ReportingDataset `
         -Dataset $Dataset `

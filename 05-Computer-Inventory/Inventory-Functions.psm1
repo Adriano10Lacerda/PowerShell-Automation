@@ -361,19 +361,42 @@ function Get-BitLockerInventory {
 
 function Get-ComputerInventory {
 
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param (
         [Parameter(Mandatory = $true)]
         [PSCustomObject]$Configuration,
 
-        [switch]$AllowRealOperation
+        [switch]$AllowRealCollection
     )
 
     if ($Configuration.SimulationMode -isnot [bool]) {
         throw "SimulationMode deve ser definido explicitamente como Boolean."
     }
 
-    if (-not $Configuration.SimulationMode -and -not $AllowRealOperation) {
-        throw "Coleta real bloqueada. Informe -AllowRealOperation explicitamente."
+    if (-not $Configuration.SimulationMode) {
+        if (-not $AllowRealCollection -and -not $WhatIfPreference) {
+            throw "Coleta real bloqueada. Informe -AllowRealCollection explicitamente."
+        }
+        if (-not $PSCmdlet.ShouldProcess(
+                [string]$env:COMPUTERNAME,
+                'Coletar inventário local via CIM e BitLocker')) {
+            return [PSCustomObject]@{
+                CollectionDateTime = $null
+                SimulationMode = $false
+                CollectionStatus = 'Preview'
+                ComputerSystem = $null
+                OperatingSystem = $null
+                Processor = $null
+                Memory = $null
+                Disk = @()
+                Network = @()
+                BitLocker = $null
+                Message = 'Coleta não executada; ShouldProcess/WhatIf recusou a operação.'
+            }
+        }
+        if (-not $AllowRealCollection) {
+            throw "Coleta real bloqueada. Informe -AllowRealCollection explicitamente."
+        }
     }
 
     $ComputerSystem = $null
@@ -461,6 +484,7 @@ function Get-ComputerInventory {
         return [PSCustomObject]@{
             CollectionDateTime = (Get-Date).ToUniversalTime().ToString("o")
             SimulationMode = $true
+            CollectionStatus = 'Simulated'
             ComputerSystem = $ComputerSystem
             OperatingSystem = $OperatingSystem
             Processor = $Processor
@@ -511,6 +535,8 @@ function Get-ComputerInventory {
 
     return [PSCustomObject]@{
         CollectionDateTime = (Get-Date).ToUniversalTime().ToString("o")
+        SimulationMode = $false
+        CollectionStatus = 'Completed'
         ComputerSystem = $ComputerSystem
         OperatingSystem = $OperatingSystem
         Processor = $Processor
@@ -740,6 +766,44 @@ function Resolve-ComputerInventoryExportFilePath {
 }
 
 
+function Write-ComputerInventoryFileCreateNew {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes
+    )
+
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open(
+            $Path,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $stream.Write($Bytes, 0, $Bytes.Length)
+        $stream.Flush($true)
+    }
+    catch {
+        if ($null -ne $stream) {
+            throw [System.IO.IOException]::new(
+                "Falha ao gravar arquivo criado com CreateNew; destino preservado para inspeção: $Path",
+                $_.Exception
+            )
+        }
+        throw
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+
 function Export-ComputerInventory {
 
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "Medium")]
@@ -764,8 +828,10 @@ function Export-ComputerInventory {
         return [PSCustomObject]@{
             Success = $true
             SimulationMode = $true
+            Partial = $false
             Directory = $null
             Files = @()
+            UncertainFiles = @()
             Message = "Simulacao concluida. Nenhum arquivo foi gravado."
         }
     }
@@ -773,6 +839,10 @@ function Export-ComputerInventory {
     if (-not $AllowRealOperation) {
         throw "Exportação real bloqueada. Informe -AllowRealOperation explicitamente."
     }
+
+    $ReportDirectory = $null
+    $ExportedFiles = @()
+    $PendingTarget = $null
 
     try {
 
@@ -796,7 +866,15 @@ function Export-ComputerInventory {
         $BaseFileName = 'ComputerInventory_' + $ComputerName + '_' + $Timestamp
         $ExportTargets = @{}
 
-        foreach ($Format in $Configuration.Output.Formats) {
+        $Formats = @($Configuration.Output.Formats)
+        if ($Formats.Count -eq 0) {
+            throw 'Pelo menos um formato JSON ou CSV deve ser configurado.'
+        }
+
+        foreach ($Format in $Formats) {
+            if ($Format -isnot [string] -or $Format.ToUpperInvariant() -notin @('JSON', 'CSV')) {
+                throw "Formato de exportação não suportado: $Format"
+            }
             switch ($Format.ToUpperInvariant()) {
                 "JSON" {
                     if ($ExportTargets.ContainsKey("JSON")) {
@@ -819,12 +897,15 @@ function Export-ComputerInventory {
             }
         }
 
-        if (-not $PSCmdlet.ShouldProcess($ReportDirectory, "Exportar inventário de computador")) {
+        $targetSummary = ($ExportTargets.Values -join ', ')
+        if (-not $PSCmdlet.ShouldProcess($targetSummary, "Criar relatórios de inventário de computador")) {
             return [PSCustomObject]@{
                 Success = $false
                 SimulationMode = $false
+                Partial = $false
                 Directory = $ReportDirectory
                 Files = @()
+                UncertainFiles = @()
                 Message = "A exportação não foi aprovada; nenhum arquivo foi gravado."
             }
         }
@@ -851,9 +932,7 @@ function Export-ComputerInventory {
 
         Assert-ComputerInventoryNoReparsePoints -Path $ReportDirectory
 
-        $ExportedFiles = @()
-
-        foreach ($Format in $Configuration.Output.Formats) {
+        foreach ($Format in $Formats) {
 
             switch ($Format.ToUpper()) {
 
@@ -867,13 +946,13 @@ function Export-ComputerInventory {
                         throw "Destino JSON mudou após a validação inicial."
                     }
 
-                    $Inventory |
-                        ConvertTo-Json -Depth 10 |
-                        Set-Content `
-                            -Path $JsonPath `
-                            -Encoding UTF8
+                    $PendingTarget = $JsonPath
+                    $jsonText = ConvertTo-Json -InputObject $Inventory -Depth 10
+                    $jsonBytes = ([System.Text.UTF8Encoding]::new($false)).GetBytes($jsonText)
+                    Write-ComputerInventoryFileCreateNew -Path $JsonPath -Bytes $jsonBytes
 
                     $ExportedFiles += $JsonPath
+                    $PendingTarget = $null
                 }
 
                 "CSV" {
@@ -939,26 +1018,26 @@ function Export-ComputerInventory {
                         BitLockerStatus = $BitLockerStatus
                     }
 
-                    $FlatInventory |
-                        Export-Csv `
-                            -Path $CsvPath `
-                            -NoTypeInformation `
-                            -Encoding UTF8
+                    $PendingTarget = $CsvPath
+                    $csvLines = @(ConvertTo-Csv -InputObject $FlatInventory -NoTypeInformation)
+                    $csvText = [string]::Join([Environment]::NewLine, [string[]]$csvLines) + [Environment]::NewLine
+                    $csvBytes = ([System.Text.UTF8Encoding]::new($false)).GetBytes($csvText)
+                    Write-ComputerInventoryFileCreateNew -Path $CsvPath -Bytes $csvBytes
 
                     $ExportedFiles += $CsvPath
+                    $PendingTarget = $null
                 }
 
-                default {
-
-                    Write-Warning "Formato de exportação não suportado: $Format"
-                }
             }
         }
 
         return [PSCustomObject]@{
             Success = $true
+            SimulationMode = $false
+            Partial = $false
             Directory = $ReportDirectory
             Files = $ExportedFiles
+            UncertainFiles = @()
             Message = "Inventário exportado com sucesso."
         }
     }
@@ -966,8 +1045,11 @@ function Export-ComputerInventory {
 
         return [PSCustomObject]@{
             Success = $false
-            Directory = $null
-            Files = @()
+            SimulationMode = $false
+            Partial = (@($ExportedFiles).Count -gt 0 -or $null -ne $PendingTarget)
+            Directory = $ReportDirectory
+            Files = @($ExportedFiles)
+            UncertainFiles = if ($null -ne $PendingTarget) { @($PendingTarget) } else { @() }
             Message = $_.Exception.Message
         }
     }

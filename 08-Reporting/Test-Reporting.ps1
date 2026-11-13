@@ -333,7 +333,7 @@ function New-ReportingTestDataset {
     param ([Parameter(Mandatory = $true)][PSCustomObject]$Configuration)
 
     Assert-ReportingTestConfigurationPaths -Configuration $Configuration
-    New-ReportingDataset -Configuration $Configuration
+    New-ReportingDataset -Configuration $Configuration -AllowRealRead
 }
 
 Test-Result "Rejeitar formas ambíguas de caminho somente por validação lexical" {
@@ -591,7 +591,8 @@ Test-Result "Descobrir arquivos do Computer Inventory" {
     $Source = $Configuration.Sources.ComputerInventory
 
     $Files = @(Get-ReportingSourceFiles `
-        -Source $Source)
+        -Source $Source `
+        -AllowRealRead)
 
     if ($Files.Count -eq 0) {
 
@@ -617,7 +618,8 @@ Test-Result "Ignorar arquivos de configuração" {
     $Source = $Configuration.Sources.ComputerInventory
 
     $Files = @(Get-ReportingSourceFiles `
-        -Source $Source)
+        -Source $Source `
+        -AllowRealRead)
 
     $ConfigurationFiles = @(
         $Files | Where-Object {
@@ -642,7 +644,8 @@ Test-Result "Ler arquivo CSV" {
 
     $CSVFile = @(
         Get-ReportingSourceFiles `
-            -Source $Source |
+            -Source $Source `
+            -AllowRealRead |
         Where-Object {
             $_.Extension -eq ".csv"
         }
@@ -655,7 +658,8 @@ Test-Result "Ler arquivo CSV" {
 
     $Result = Get-ReportingData `
         -File $CSVFile `
-        -SourceName "ComputerInventory"
+        -SourceName "ComputerInventory" `
+        -AllowRealRead
 
     if ($Result.Success -ne $true) {
 
@@ -679,7 +683,8 @@ Test-Result "Ler arquivo JSON" {
 
     $JSONFile = @(
         Get-ReportingSourceFiles `
-            -Source $Source |
+            -Source $Source `
+            -AllowRealRead |
         Where-Object {
             $_.Extension -eq ".json"
         }
@@ -692,7 +697,8 @@ Test-Result "Ler arquivo JSON" {
 
     $Result = Get-ReportingData `
         -File $JSONFile `
-        -SourceName "ComputerInventory"
+        -SourceName "ComputerInventory" `
+        -AllowRealRead
 
     if ($Result.Success -ne $true) {
 
@@ -702,6 +708,19 @@ Test-Result "Ler arquivo JSON" {
     if ($Result.Format -ne "JSON") {
 
         throw "O formato identificado não corresponde a JSON."
+    }
+
+    $WildcardFilePath = Join-Path $TestInputDirectory 'ComputerInventory_[1].json'
+    Set-ReportingTestFixture `
+        -Path $WildcardFilePath `
+        -Value '{"ComputerName":"REPORTING-META-PC"}'
+    $WildcardResult = Get-ReportingData `
+        -File ([System.IO.FileInfo]::new($WildcardFilePath)) `
+        -SourceName "ComputerInventory" `
+        -AllowRealRead
+    if ($WildcardResult.Success -ne $true -or
+        $WildcardResult.Data.ComputerName -ne 'REPORTING-META-PC') {
+        throw "Get-ReportingData não leu literalmente o arquivo cujo nome contém metacaracteres."
     }
 }
 
@@ -715,7 +734,8 @@ Test-Result "Gerar resumo dos dados" {
     $Source = $Configuration.Sources.ComputerInventory
 
     $Files = @(Get-ReportingSourceFiles `
-        -Source $Source)
+        -Source $Source `
+        -AllowRealRead)
 
     $Data = @()
 
@@ -723,7 +743,8 @@ Test-Result "Gerar resumo dos dados" {
 
         $Data += Get-ReportingData `
             -File $File `
-            -SourceName "ComputerInventory"
+            -SourceName "ComputerInventory" `
+            -AllowRealRead
     }
 
     $Summary = Get-ReportingSummary `
@@ -812,7 +833,7 @@ Test-Result "Exportar Dataset em simulação sem gravar arquivos" {
 Test-Result "Executar Invoke-Reporting em simulação" {
 
     Assert-ReportingTestConfigurationPaths -Configuration $Configuration
-    $Result = Invoke-Reporting -Configuration $Configuration -AllowedRoot $TestWorkspace
+    $Result = Invoke-Reporting -Configuration $Configuration -AllowRealRead -AllowedRoot $TestWorkspace
 
     if ($Result.Success -ne $true) {
         throw "Invoke-Reporting não retornou sucesso."
@@ -1227,7 +1248,7 @@ Test-Result "Falhas ao processar fontes afetam o resultado geral" {
     Set-ReportingTestFixture -Path $InvalidJsonPath -Value "{ invalid json" -Encoding UTF8
 
     Assert-ReportingTestConfigurationPaths -Configuration $Configuration
-    $Result = Invoke-Reporting -Configuration $Configuration -AllowedRoot $TestWorkspace
+    $Result = Invoke-Reporting -Configuration $Configuration -AllowRealRead -AllowedRoot $TestWorkspace
 
     if ($Result.Success -ne $false -or $Result.Summary.FailedFiles -ne 1) {
         throw "Falha de leitura de origem deveria tornar o resultado geral malsucedido."
@@ -1328,7 +1349,36 @@ Test-Result "WhatIf retorna Preview sem materializar dataset ou saída" {
     }
 }
 
-# TESTE 30 - Rejeitar destinos fora da raiz autorizada
+# TESTE 31 - Bloquear leituras reais sem autorização explícita
+Test-Result "Bloquear leituras reais sem autorização explícita" {
+    $ReadConfig = Copy-ReportingTestConfiguration
+    $ReadConfig.SimulationMode = $true
+    $ReadOperations = @(
+        { Get-ReportingSourceFiles -Source $ReadConfig.Sources.ComputerInventory },
+        { Get-ReportingData -File ([System.IO.FileInfo]::new((Join-Path $TestWorkspace 'not-present.json'))) },
+        { New-ReportingDataset -Configuration $ReadConfig },
+        { Invoke-Reporting -Configuration $ReadConfig }
+    )
+
+    foreach ($ReadOperation in $ReadOperations) {
+        $Rejected = $false
+        try {
+            & $ReadOperation | Out-Null
+        }
+        catch {
+            $Rejected = $_.FullyQualifiedErrorId.StartsWith(
+                'Reporting.ReadAuthorizationRequired',
+                [System.StringComparison]::Ordinal
+            )
+        }
+
+        if (-not $Rejected) {
+            throw "Uma operação de leitura não bloqueou sem -AllowRealRead."
+        }
+    }
+}
+
+# TESTE 32 - Rejeitar destinos fora da raiz autorizada
 Test-Result "Rejeitar caminho absoluto fora de AllowedRoot" {
     $OutsideConfig = Copy-ReportingTestConfiguration
     $OutsideConfig.SimulationMode = $false
@@ -1346,6 +1396,167 @@ Test-Result "Rejeitar caminho absoluto fora de AllowedRoot" {
     if (-not $Rejected) {
         throw "Um destino externo à raiz permitida não foi rejeitado."
     }
+}
+
+# TESTE 33 - WhatIf bloqueia leituras diretas da interface interativa
+Test-Result "WhatIf bloqueia resumo e listagem de arquivos antes da leitura" {
+    $EntryPointPath = Join-Path $PSScriptRoot 'Reporting.ps1'
+    $EntryPointText = Get-Content -LiteralPath $EntryPointPath -Raw -ErrorAction Stop
+
+    $SummaryStart = $EntryPointText.IndexOf('function Show-Summary', [System.StringComparison]::Ordinal)
+    $SummaryEnd = $EntryPointText.IndexOf('function Invoke-Report', $SummaryStart, [System.StringComparison]::Ordinal)
+    if ($SummaryStart -lt 0 -or $SummaryEnd -le $SummaryStart) {
+        throw 'Não foi possível delimitar estaticamente Show-Summary.'
+    }
+    $SummaryBody = $EntryPointText.Substring($SummaryStart, $SummaryEnd - $SummaryStart)
+    $SummaryWhatIf = $SummaryBody.IndexOf('if ($WhatIfPreference)', [System.StringComparison]::Ordinal)
+    $SummaryRead = $SummaryBody.IndexOf('New-ReportingDataset', [System.StringComparison]::Ordinal)
+    if ($SummaryWhatIf -lt 0 -or $SummaryRead -lt 0 -or $SummaryWhatIf -ge $SummaryRead) {
+        throw 'Show-Summary não bloqueia WhatIf antes da leitura de fontes.'
+    }
+
+    $FileMenuStart = $EntryPointText.IndexOf('"4" {', [System.StringComparison]::Ordinal)
+    $FileMenuEnd = $EntryPointText.IndexOf('"0" {', $FileMenuStart, [System.StringComparison]::Ordinal)
+    if ($FileMenuStart -lt 0 -or $FileMenuEnd -le $FileMenuStart) {
+        throw 'Não foi possível delimitar estaticamente a opção 4.'
+    }
+    $FileMenuBody = $EntryPointText.Substring($FileMenuStart, $FileMenuEnd - $FileMenuStart)
+    $MenuWhatIf = $FileMenuBody.IndexOf('if ($WhatIfPreference)', [System.StringComparison]::Ordinal)
+    $MenuRead = $FileMenuBody.IndexOf('Get-ReportingSourceFiles', [System.StringComparison]::Ordinal)
+    if ($MenuWhatIf -lt 0 -or $MenuRead -lt 0 -or $MenuWhatIf -ge $MenuRead) {
+        throw 'A opção 4 não bloqueia WhatIf antes da enumeração de arquivos.'
+    }
+
+    $FunctionsPath = Join-Path $PSScriptRoot 'Reporting-Functions.psm1'
+    $FunctionsText = Get-Content -LiteralPath $FunctionsPath -Raw -ErrorAction Stop
+    $DirectReadFunctions = @(
+        [PSCustomObject]@{
+            Start = 'function Get-ReportingSourceFiles {'
+            End = 'function Get-ReportingData {'
+            Read = 'Get-ChildItem'
+        },
+        [PSCustomObject]@{
+            Start = 'function Get-ReportingData {'
+            End = 'function Get-ReportingSummary {'
+            Read = 'Get-Content'
+        },
+        [PSCustomObject]@{
+            Start = 'function New-ReportingDataset {'
+            End = 'function Write-ReportingTextCreateNew {'
+            Read = 'Get-ReportingSourceFiles'
+        }
+    )
+
+    foreach ($DirectReadFunction in $DirectReadFunctions) {
+        $FunctionStart = $FunctionsText.IndexOf($DirectReadFunction.Start, [System.StringComparison]::Ordinal)
+        $FunctionEnd = $FunctionsText.IndexOf($DirectReadFunction.End, $FunctionStart, [System.StringComparison]::Ordinal)
+        if ($FunctionStart -lt 0 -or $FunctionEnd -le $FunctionStart) {
+            throw "Não foi possível delimitar estaticamente '$($DirectReadFunction.Start)'."
+        }
+        $FunctionBody = $FunctionsText.Substring($FunctionStart, $FunctionEnd - $FunctionStart)
+        $WhatIfPosition = $FunctionBody.IndexOf('if ($WhatIfPreference)', [System.StringComparison]::Ordinal)
+        $ReadPosition = $FunctionBody.IndexOf($DirectReadFunction.Read, [System.StringComparison]::Ordinal)
+        if ($WhatIfPosition -lt 0 -or $ReadPosition -lt 0 -or $WhatIfPosition -ge $ReadPosition) {
+            throw "WhatIf não bloqueia leitura em '$($DirectReadFunction.Start)'."
+        }
+    }
+
+    $DataStart = $FunctionsText.IndexOf('function Get-ReportingData {', [System.StringComparison]::Ordinal)
+    $DataEnd = $FunctionsText.IndexOf('function Get-ReportingSummary {', $DataStart, [System.StringComparison]::Ordinal)
+    $DataBody = $FunctionsText.Substring($DataStart, $DataEnd - $DataStart)
+    if ($DataBody -notmatch '(?s)Get-Content\s+`?\s*-LiteralPath\s+\$File\.FullName' -or
+        $DataBody -notmatch '(?s)Import-Csv\s+`?\s*-LiteralPath\s+\$File\.FullName') {
+        throw 'Get-ReportingData deve usar LiteralPath para nomes de arquivo sem interpretação de wildcard.'
+    }
+
+    $ReadProbeCounters = [PSCustomObject]@{
+        GetChildItem = 0
+        GetContent = 0
+        ImportCsv = 0
+    }
+    $GetChildItemStub = {
+        $ReadProbeCounters.GetChildItem++
+        throw 'WhatIf read probe blocked Get-ChildItem.'
+    }.GetNewClosure()
+    $GetContentStub = {
+        $ReadProbeCounters.GetContent++
+        throw 'WhatIf read probe blocked Get-Content.'
+    }.GetNewClosure()
+    $ImportCsvStub = {
+        $ReadProbeCounters.ImportCsv++
+        throw 'WhatIf read probe blocked Import-Csv.'
+    }.GetNewClosure()
+    $ReadProbeStubs = @{
+        'Get-ChildItem' = $GetChildItemStub
+        'Get-Content' = $GetContentStub
+        'Import-Csv' = $ImportCsvStub
+    }
+    $ReadProbeFile = [System.IO.FileInfo]::new(
+        (Join-Path $TestWorkspace 'missing-[whatif].json')
+    )
+    $ReadProbeSource = [PSCustomObject]@{
+        Directory = Join-Path $TestWorkspace 'missing-[whatif]'
+        FilePattern = '*.json'
+        Formats = @('json')
+        Enabled = $true
+    }
+    $ReadProbeConfiguration = Copy-ReportingTestConfiguration
+    $ReadProbeConfiguration.Sources.ComputerInventory.Directory = $ReadProbeSource.Directory
+
+    & $ReportingModuleInfo {
+        param ($SourceFixture, $ConfigurationFixture, $FileFixture, $Counters, $Stubs)
+
+        $SavedWhatIfPreference = $WhatIfPreference
+        $FunctionNames = @('Get-ChildItem', 'Get-Content', 'Import-Csv')
+        $OriginalFunctions = @{}
+        foreach ($FunctionName in $FunctionNames) {
+            $FunctionPath = "Function:\script:$FunctionName"
+            $ExistingFunction = Get-Item -LiteralPath $FunctionPath -ErrorAction SilentlyContinue
+            if ($null -ne $ExistingFunction) {
+                $OriginalFunctions[$FunctionName] = $ExistingFunction.ScriptBlock
+            }
+        }
+
+        try {
+            foreach ($FunctionName in $FunctionNames) {
+                Set-Item `
+                    -LiteralPath "Function:\script:$FunctionName" `
+                    -Value $Stubs[$FunctionName] `
+                    -Force |
+                    Out-Null
+            }
+            $WhatIfPreference = $true
+
+            $SourceResults = @(Get-ReportingSourceFiles -Source $SourceFixture -AllowRealRead)
+            $DataResult = Get-ReportingData -File $FileFixture -AllowRealRead
+            $DatasetResult = New-ReportingDataset -Configuration $ConfigurationFixture -AllowRealRead
+
+            if ($SourceResults.Count -ne 0 -or
+                $DataResult.Mode -ne 'Preview' -or
+                $DatasetResult.Mode -ne 'Preview' -or
+                $DatasetResult.Files.Count -ne 0) {
+                throw 'As APIs diretas não retornaram os estados Preview esperados.'
+            }
+
+            if ($Counters.GetChildItem -ne 0 -or
+                $Counters.GetContent -ne 0 -or
+                $Counters.ImportCsv -ne 0) {
+                throw 'Um cmdlet de leitura foi alcançado apesar de WhatIfPreference.'
+            }
+        }
+        finally {
+            $WhatIfPreference = $SavedWhatIfPreference
+            foreach ($FunctionName in $FunctionNames) {
+                $FunctionPath = "Function:\script:$FunctionName"
+                if ($OriginalFunctions.ContainsKey($FunctionName)) {
+                    Set-Item -LiteralPath $FunctionPath -Value $OriginalFunctions[$FunctionName] -Force | Out-Null
+                }
+                else {
+                    Remove-Item -LiteralPath $FunctionPath -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    } $ReadProbeSource $ReadProbeConfiguration $ReadProbeFile $ReadProbeCounters $ReadProbeStubs
 }
 }
 finally {
